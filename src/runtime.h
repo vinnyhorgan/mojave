@@ -40,6 +40,8 @@ typedef struct MojaveGame {
     const char *save_path;
     bool save_loaded;
     const MojaveDialogueNode *active_dialogue_node;
+    int active_npc_index;
+    int nearby_npc_index;
     int selected_dialogue_choice;
 } MojaveGame;
 
@@ -57,5 +59,8 @@ bool mojave_game_save_loaded(const MojaveGame *game);
 bool mojave_game_dialogue_active(const MojaveGame *game);
 const MojaveDialogueNode *mojave_game_dialogue_node(const MojaveGame *game);
 int mojave_game_dialogue_selected_choice(const MojaveGame *game);
+int mojave_game_nearby_npc_index(const MojaveGame *game);
+int mojave_game_npc_count(const MojaveGame *game);
+const MojaveNpc *mojave_game_npc(const MojaveGame *game, int index);
 
 #endif

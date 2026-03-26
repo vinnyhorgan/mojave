@@ -26,6 +26,14 @@ typedef struct MojaveDialogue {
     int node_count;
 } MojaveDialogue;
 
+typedef struct MojaveNpc {
+    char *id;
+    char *name;
+    char *dialogue_path;
+    int spawn_x;
+    int spawn_y;
+} MojaveNpc;
+
 typedef struct MojaveMap {
     char name[MOJAVE_MAP_NAME_MAX];
     int width;
@@ -34,6 +42,8 @@ typedef struct MojaveMap {
     int player_spawn_x;
     int player_spawn_y;
     int *tiles;
+    MojaveNpc *npcs;
+    int npc_count;
 } MojaveMap;
 
 bool mojave_map_load(const char *path, MojaveMap *map);

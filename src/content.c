@@ -7,10 +7,18 @@
 #include <yyjson.h>
 
 static void mojave_map_reset(MojaveMap *map) {
+    int i;
+
     if (map == NULL) {
         return;
     }
 
+    for (i = 0; i < map->npc_count; i += 1) {
+        free(map->npcs[i].id);
+        free(map->npcs[i].name);
+        free(map->npcs[i].dialogue_path);
+    }
+    free(map->npcs);
     free(map->tiles);
     memset(map, 0, sizeof(*map));
 }
@@ -96,6 +104,7 @@ static bool mojave_file_exists(const char *path) {
 bool mojave_map_load(const char *path, MojaveMap *map) {
     yyjson_doc *doc;
     yyjson_val *root;
+    yyjson_val *npcs;
     yyjson_val *tiles;
     yyjson_val *spawn;
     yyjson_arr_iter iter;
@@ -108,6 +117,7 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     yyjson_val *spawn_y;
     size_t index;
     size_t expected_count;
+    int npc_index;
 
     if (path == NULL || map == NULL) {
         return false;
@@ -127,6 +137,7 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     }
 
     tiles = yyjson_obj_get(root, "tiles");
+    npcs = yyjson_obj_get(root, "npcs");
     spawn = yyjson_obj_get(root, "player_spawn");
     name = yyjson_obj_get(root, "name");
     width = yyjson_obj_get(root, "width");
@@ -197,6 +208,69 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
         yyjson_get_str(name) != NULL
             ? yyjson_get_str(name)
             : "Unnamed Map");
+
+    if (npcs != NULL) {
+        yyjson_arr_iter npc_iter;
+        yyjson_val *npc_value;
+
+        if (!yyjson_is_arr(npcs)) {
+            fprintf(stderr, "Map file '%s' has an invalid npc list\n", path);
+            yyjson_doc_free(doc);
+            mojave_map_reset(map);
+            return false;
+        }
+
+        map->npc_count = (int)yyjson_arr_size(npcs);
+        map->npcs = calloc((size_t)map->npc_count, sizeof(*map->npcs));
+        if (map->npcs == NULL && map->npc_count > 0) {
+            yyjson_doc_free(doc);
+            mojave_map_reset(map);
+            return false;
+        }
+
+        npc_index = 0;
+        yyjson_arr_iter_init(npcs, &npc_iter);
+        while ((npc_value = yyjson_arr_iter_next(&npc_iter)) != NULL) {
+            MojaveNpc *npc = &map->npcs[npc_index];
+            yyjson_val *npc_id = yyjson_obj_get(npc_value, "id");
+            yyjson_val *npc_name = yyjson_obj_get(npc_value, "name");
+            yyjson_val *npc_dialogue = yyjson_obj_get(npc_value, "dialogue");
+            yyjson_val *npc_spawn = yyjson_obj_get(npc_value, "spawn");
+            yyjson_val *npc_spawn_x;
+            yyjson_val *npc_spawn_y;
+
+            if (!yyjson_is_obj(npc_value) || !yyjson_is_str(npc_id) || !yyjson_is_str(npc_name) ||
+                !yyjson_is_str(npc_dialogue) || !yyjson_is_obj(npc_spawn)) {
+                fprintf(stderr, "Map file '%s' has an invalid npc\n", path);
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
+            npc_spawn_x = yyjson_obj_get(npc_spawn, "x");
+            npc_spawn_y = yyjson_obj_get(npc_spawn, "y");
+            if (!yyjson_is_int(npc_spawn_x) || !yyjson_is_int(npc_spawn_y)) {
+                fprintf(stderr, "Map file '%s' has an npc with invalid spawn data\n", path);
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
+            npc->id = mojave_strdup(yyjson_get_str(npc_id));
+            npc->name = mojave_strdup(yyjson_get_str(npc_name));
+            npc->dialogue_path = mojave_strdup(yyjson_get_str(npc_dialogue));
+            npc->spawn_x = (int)yyjson_get_int(npc_spawn_x);
+            npc->spawn_y = (int)yyjson_get_int(npc_spawn_y);
+
+            if (npc->id == NULL || npc->name == NULL || npc->dialogue_path == NULL) {
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
+            npc_index += 1;
+        }
+    }
 
     yyjson_doc_free(doc);
     return true;

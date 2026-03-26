@@ -4,6 +4,8 @@
 
 static Camera2D g_camera;
 
+static const float MOJAVE_NPC_DRAW_SIZE = 18.0f;
+
 static Color mojave_floor_color(void) {
     return (Color){60, 92, 65, 255};
 }
@@ -40,6 +42,32 @@ static void mojave_backend_draw_map(const MojaveMap *map) {
             DrawRectangleRec(rect, tile == 0 ? mojave_floor_color() : mojave_wall_color());
             DrawRectangleLinesEx(rect, 1.0f, (Color){0, 0, 0, 35});
         }
+    }
+}
+
+static void mojave_backend_draw_npcs(const MojaveGame *game) {
+    int i;
+    int nearby_npc_index = mojave_game_nearby_npc_index(game);
+    const MojaveMap *map = mojave_game_map(game);
+
+    for (i = 0; i < mojave_game_npc_count(game); i += 1) {
+        const MojaveNpc *npc = mojave_game_npc(game, i);
+        Rectangle rect;
+        Color fill;
+
+        if (npc == NULL) {
+            continue;
+        }
+
+        rect.x = (float)(npc->spawn_x * map->tile_size + 7);
+        rect.y = (float)(npc->spawn_y * map->tile_size + 7);
+        rect.width = MOJAVE_NPC_DRAW_SIZE;
+        rect.height = MOJAVE_NPC_DRAW_SIZE;
+        fill = i == nearby_npc_index ? (Color){205, 160, 76, 255} : (Color){161, 92, 70, 255};
+
+        DrawRectangleRec(rect, fill);
+        DrawRectangleLinesEx(rect, 2.0f, (Color){56, 28, 21, 255});
+        DrawText(npc->name, (int)rect.x - 6, (int)rect.y - 18, 10, BLACK);
     }
 }
 
@@ -147,6 +175,7 @@ void mojave_backend_draw(const MojaveGame *game) {
 
     BeginMode2D(g_camera);
     mojave_backend_draw_map(map);
+    mojave_backend_draw_npcs(game);
     DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
     DrawRectangleLinesEx(player_rect, 2.0f, (Color){14, 37, 58, 255});
     DrawRectangleLines(0, 0, map_width_px, map_height_px, BLACK);
@@ -156,7 +185,7 @@ void mojave_backend_draw(const MojaveGame *game) {
     DrawRectangleLines(12, 12, 300, 112, DARKGRAY);
     DrawText(map->name, 24, 24, 20, BLACK);
     DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
-    DrawText("Talk: Enter / Space", 24, 74, 20, BLACK);
+    DrawText("Talk: Enter / Space / E", 24, 74, 20, BLACK);
     DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 24, 96, 20, DARKGRAY);
 
     mojave_backend_draw_dialogue(game);
