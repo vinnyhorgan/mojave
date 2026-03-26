@@ -13,3 +13,11 @@ The long-term objective of Mojave is to make it easier for people to create game
 The project currently depends on three core libraries only. Flecs is used as the main ECS and is cloned locally in the repository root as a gitignored dependency. yyjson is used for JSON parsing and writing and can be consumed from the system package. Raylib is used as the initial backend and can also be consumed from the system package.
 
 When working on Mojave, prioritize simplicity, determinism, modularity, and strong data modeling. Prefer explicit systems over clever abstractions. Keep the runtime generic, keep the codebase tight, and make choices that support the broader goal of a reusable, data-driven top-down RPG engine.
+
+For Mojave, "data-driven" means the Fallout: New Vegas model: engine systems are hardcoded in C, while game content is authored as structured data. Do not try to make the core engine itself soft, scriptable, or endlessly configurable just for flexibility. The goal is a fixed set of strong runtime systems that can be combined through data files and, later, GUI authoring tools.
+
+Treat JSON as a development-time authoring format. Data schemas should be explicit, stable, editor-friendly, and built around strong IDs and references so future tools can safely create, validate, and modify content. Prefer reusable definitions and archetypes over ad hoc one-off inline data when that improves authoring clarity.
+
+The current project phase is still prototyping. Use simple placeholder shapes for visuals and do not introduce audio systems or real asset pipeline work unless explicitly requested. However, prototype UI must still be robust: always measure text, avoid overlap, clamp or scroll overflowing content, and keep layouts readable at runtime.
+
+Keep system boundaries clean. Runtime owns gameplay rules, simulation state, quests, dialogue logic, inventory logic, and save/load behavior. The backend should mainly handle rendering, input, and presentation. Avoid leaking gameplay decisions into backend code.
