@@ -124,12 +124,12 @@ void mojave_backend_draw(const MojaveGame *game) {
     DrawRectangleLines(0, 0, map_width_px, map_height_px, BLACK);
     EndMode2D();
 
-    DrawRectangle(12, 12, 300, 102, Fade(RAYWHITE, 0.85f));
-    DrawRectangleLines(12, 12, 300, 102, DARKGRAY);
+    DrawRectangle(12, 12, 300, 112, Fade(RAYWHITE, 0.85f));
+    DrawRectangleLines(12, 12, 300, 112, DARKGRAY);
     DrawText(map->name, 24, 24, 20, BLACK);
-    DrawText("Move: WASD / Arrows", 24, 52, 18, BLACK);
-    DrawText("Save: F5   Load: F9", 24, 74, 18, BLACK);
-    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 24, 96, 18, DARKGRAY);
+    DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
+    DrawText("Save: F5   Load: F9", 24, 74, 20, BLACK);
+    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 24, 96, 20, DARKGRAY);
 
     EndDrawing();
 }
