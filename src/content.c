@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <errno.h>
-
 #include <yyjson.h>
 
 static void mojave_map_reset(MojaveMap *map) {
@@ -50,6 +48,12 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     yyjson_val *spawn;
     yyjson_arr_iter iter;
     yyjson_val *tile;
+    yyjson_val *name;
+    yyjson_val *width;
+    yyjson_val *height;
+    yyjson_val *tile_size;
+    yyjson_val *spawn_x;
+    yyjson_val *spawn_y;
     size_t index;
     size_t expected_count;
 
@@ -72,18 +76,10 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
 
     tiles = yyjson_obj_get(root, "tiles");
     spawn = yyjson_obj_get(root, "player_spawn");
-
-    map->width = (int)yyjson_get_int(yyjson_obj_get(root, "width"));
-    map->height = (int)yyjson_get_int(yyjson_obj_get(root, "height"));
-    map->tile_size = (int)yyjson_get_int(yyjson_obj_get(root, "tile_size"));
-    map->player_spawn_x = (int)yyjson_get_int(yyjson_obj_get(spawn, "x"));
-    map->player_spawn_y = (int)yyjson_get_int(yyjson_obj_get(spawn, "y"));
-
-    if (map->width <= 0 || map->height <= 0 || map->tile_size <= 0) {
-        fprintf(stderr, "Map file '%s' has invalid dimensions\n", path);
-        yyjson_doc_free(doc);
-        return false;
-    }
+    name = yyjson_obj_get(root, "name");
+    width = yyjson_obj_get(root, "width");
+    height = yyjson_obj_get(root, "height");
+    tile_size = yyjson_obj_get(root, "tile_size");
 
     if (!yyjson_is_arr(tiles) || !yyjson_is_obj(spawn)) {
         fprintf(stderr, "Map file '%s' is missing required fields\n", path);
@@ -91,6 +87,27 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
         return false;
     }
 
+    spawn_x = yyjson_obj_get(spawn, "x");
+    spawn_y = yyjson_obj_get(spawn, "y");
+
+    if (!yyjson_is_int(width) || !yyjson_is_int(height) || !yyjson_is_int(tile_size) ||
+        !yyjson_is_int(spawn_x) || !yyjson_is_int(spawn_y)) {
+        fprintf(stderr, "Map file '%s' has invalid numeric fields\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    map->width = (int)yyjson_get_int(width);
+    map->height = (int)yyjson_get_int(height);
+    map->tile_size = (int)yyjson_get_int(tile_size);
+    map->player_spawn_x = (int)yyjson_get_int(spawn_x);
+    map->player_spawn_y = (int)yyjson_get_int(spawn_y);
+
+    if (map->width <= 0 || map->height <= 0 || map->tile_size <= 0) {
+        fprintf(stderr, "Map file '%s' has invalid dimensions\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
     expected_count = (size_t)map->width * (size_t)map->height;
     if (yyjson_arr_size(tiles) != expected_count) {
         fprintf(stderr,
@@ -113,13 +130,20 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     index = 0;
     yyjson_arr_iter_init(tiles, &iter);
     while ((tile = yyjson_arr_iter_next(&iter)) != NULL) {
+        if (!yyjson_is_int(tile)) {
+            fprintf(stderr, "Map file '%s' contains a non-integer tile value\n", path);
+            yyjson_doc_free(doc);
+            mojave_map_reset(map);
+            return false;
+        }
+
         map->tiles[index] = (int)yyjson_get_int(tile);
         index += 1;
     }
 
     snprintf(map->name, sizeof(map->name), "%s",
-        yyjson_get_str(yyjson_obj_get(root, "name")) != NULL
-            ? yyjson_get_str(yyjson_obj_get(root, "name"))
+        yyjson_get_str(name) != NULL
+            ? yyjson_get_str(name)
             : "Unnamed Map");
 
     yyjson_doc_free(doc);
@@ -164,7 +188,13 @@ bool mojave_save_write_player(const char *path, float x, float y) {
         return false;
     }
 
-    fwrite(json, 1, length, file);
+    if (fwrite(json, 1, length, file) != length) {
+        fprintf(stderr, "Failed to write save file '%s'\n", path);
+        fclose(file);
+        free(json);
+        return false;
+    }
+
     fclose(file);
     free(json);
     return true;

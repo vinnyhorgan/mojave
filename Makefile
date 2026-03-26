@@ -6,11 +6,13 @@ BUILD_DIR := build
 
 SOURCES := \
 	src/main.c \
+	src/backend_raylib.c \
 	src/runtime.c \
 	src/content.c \
 	flecs/distr/flecs.c
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
+DEPFILES := $(OBJECTS:.o=.d)
 
 CPPFLAGS := \
 	-D_POSIX_C_SOURCE=200809L \
@@ -20,7 +22,7 @@ CPPFLAGS := \
 	-I./flecs/distr \
 	$(shell $(PKG_CONFIG) --cflags raylib yyjson)
 
-CFLAGS := -std=c99 -Wall -Wextra -pedantic
+CFLAGS := -std=c99 -Wall -Wextra -pedantic -MMD -MP
 LDLIBS := $(shell $(PKG_CONFIG) --libs raylib yyjson) -lm
 
 .PHONY: all clean run
@@ -39,3 +41,5 @@ run: $(TARGET)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+-include $(DEPFILES)

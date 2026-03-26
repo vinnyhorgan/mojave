@@ -1,7 +1,6 @@
 #include "runtime.h"
 
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 
 static const float MOJAVE_PLAYER_SIZE = 18.0f;
@@ -22,17 +21,17 @@ static bool mojave_map_is_solid(const MojaveMap *map, int x, int y) {
     return mojave_map_tile_at(map, x, y) != 0;
 }
 
-static bool mojave_rect_hits_solid(const MojaveMap *map, Rectangle rect) {
-    int min_x = (int)floorf(rect.x / (float)map->tile_size);
-    int max_x = (int)floorf((rect.x + rect.width - 1.0f) / (float)map->tile_size);
-    int min_y = (int)floorf(rect.y / (float)map->tile_size);
-    int max_y = (int)floorf((rect.y + rect.height - 1.0f) / (float)map->tile_size);
-    int x;
-    int y;
+static bool mojave_rect_hits_solid(const MojaveMap *map, float x, float y, float width, float height) {
+    int min_x = (int)floorf(x / (float)map->tile_size);
+    int max_x = (int)floorf((x + width - 1.0f) / (float)map->tile_size);
+    int min_y = (int)floorf(y / (float)map->tile_size);
+    int max_y = (int)floorf((y + height - 1.0f) / (float)map->tile_size);
+    int tile_x;
+    int tile_y;
 
-    for (y = min_y; y <= max_y; y += 1) {
-        for (x = min_x; x <= max_x; x += 1) {
-            if (mojave_map_is_solid(map, x, y)) {
+    for (tile_y = min_y; tile_y <= max_y; tile_y += 1) {
+        for (tile_x = min_x; tile_x <= max_x; tile_x += 1) {
+            if (mojave_map_is_solid(map, tile_x, tile_y)) {
                 return true;
             }
         }
@@ -41,47 +40,20 @@ static bool mojave_rect_hits_solid(const MojaveMap *map, Rectangle rect) {
     return false;
 }
 
-static void mojave_move_player(const MojaveMap *map, Position *position, Velocity velocity, float dt) {
-    Rectangle body;
-
-    /* The player uses a single rectangle for now so collision stays obvious. */
-    body.x = position->x;
-    body.y = position->y;
-    body.width = MOJAVE_PLAYER_SIZE;
-    body.height = MOJAVE_PLAYER_SIZE;
-
-    body.x += velocity.x * dt;
-    if (!mojave_rect_hits_solid(map, body)) {
-        position->x = body.x;
-    } else {
-        body.x = position->x;
-    }
-
-    body.y += velocity.y * dt;
-    if (!mojave_rect_hits_solid(map, body)) {
-        position->y = body.y;
-    }
-}
-
-static Velocity mojave_read_input(void) {
+static Velocity mojave_velocity_from_input(const MojaveInput *input) {
     Velocity velocity = {0.0f, 0.0f};
 
-    if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) {
-        velocity.x -= 1.0f;
-    }
-    if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) {
-        velocity.x += 1.0f;
-    }
-    if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) {
-        velocity.y -= 1.0f;
-    }
-    if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) {
-        velocity.y += 1.0f;
+    if (input == NULL) {
+        return velocity;
     }
 
+    velocity.x = input->move_x;
+    velocity.y = input->move_y;
+
     if (velocity.x != 0.0f || velocity.y != 0.0f) {
-        /* Normalize diagonal movement so every direction moves at the same speed. */
         float length = sqrtf(velocity.x * velocity.x + velocity.y * velocity.y);
+
+        /* Normalize diagonal movement so every direction moves at the same speed. */
         velocity.x = (velocity.x / length) * MOJAVE_PLAYER_SPEED;
         velocity.y = (velocity.y / length) * MOJAVE_PLAYER_SPEED;
     }
@@ -89,23 +61,24 @@ static Velocity mojave_read_input(void) {
     return velocity;
 }
 
-static void mojave_draw_map(const MojaveMap *map) {
-    int x;
-    int y;
+static void mojave_move_player(const MojaveMap *map, Position *position, Velocity velocity, float dt) {
+    float next_x;
+    float next_y;
 
-    for (y = 0; y < map->height; y += 1) {
-        for (x = 0; x < map->width; x += 1) {
-            int tile = map->tiles[y * map->width + x];
-            Rectangle rect = {
-                (float)(x * map->tile_size),
-                (float)(y * map->tile_size),
-                (float)map->tile_size,
-                (float)map->tile_size,
-            };
+    if (position == NULL) {
+        return;
+    }
 
-            DrawRectangleRec(rect, tile == 0 ? (Color){60, 92, 65, 255} : (Color){87, 73, 54, 255});
-            DrawRectangleLinesEx(rect, 1.0f, (Color){0, 0, 0, 35});
-        }
+    /* The player uses a single rectangle for now so collision stays obvious. */
+    next_x = position->x + velocity.x * dt;
+    next_y = position->y + velocity.y * dt;
+
+    if (!mojave_rect_hits_solid(map, next_x, position->y, MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE)) {
+        position->x = next_x;
+    }
+
+    if (!mojave_rect_hits_solid(map, position->x, next_y, MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE)) {
+        position->y = next_y;
     }
 }
 
@@ -144,10 +117,6 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
         game->save_loaded = true;
     }
 
-    game->camera.zoom = 1.0f;
-    game->camera.offset = (Vector2){640.0f / 2.0f, 360.0f / 2.0f};
-    game->camera.target = (Vector2){position->x, position->y};
-
     return true;
 }
 
@@ -164,26 +133,26 @@ void mojave_game_shutdown(MojaveGame *game) {
     mojave_map_unload(&game->map);
 }
 
-void mojave_game_update(MojaveGame *game, float dt) {
+void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     Position *position;
     Velocity velocity;
 
+    if (game == NULL || game->world == NULL) {
+        return;
+    }
+
     position = ecs_get_mut(game->world, game->player, Position);
-    velocity = mojave_read_input();
+    velocity = mojave_velocity_from_input(input);
+    ecs_set(game->world, game->player, Velocity, {velocity.x, velocity.y});
 
-    ecs_set(game->world, game->player, Velocity, { velocity.x, velocity.y });
-
-    /* Update flow stays explicit: read input, move, then refresh the camera. */
+    /* Update flow stays explicit: read input, move, then handle save or load. */
     mojave_move_player(&game->map, position, velocity, dt);
 
-    game->camera.target.x = position->x + MOJAVE_PLAYER_SIZE * 0.5f;
-    game->camera.target.y = position->y + MOJAVE_PLAYER_SIZE * 0.5f;
-
-    if (IsKeyPressed(KEY_F5)) {
+    if (input != NULL && input->save_pressed) {
         mojave_save_write_player(game->save_path, position->x, position->y);
     }
 
-    if (IsKeyPressed(KEY_F9)) {
+    if (input != NULL && input->load_pressed) {
         float save_x;
         float save_y;
 
@@ -195,33 +164,37 @@ void mojave_game_update(MojaveGame *game, float dt) {
     }
 }
 
-void mojave_game_draw(const MojaveGame *game) {
+const MojaveMap *mojave_game_map(const MojaveGame *game) {
+    if (game == NULL) {
+        return NULL;
+    }
+
+    return &game->map;
+}
+
+MojaveVec2 mojave_game_player_position(const MojaveGame *game) {
     const Position *position;
-    Rectangle player_rect;
-    int map_width_px;
-    int map_height_px;
+
+    if (game == NULL || game->world == NULL) {
+        return (MojaveVec2){0.0f, 0.0f};
+    }
 
     position = ecs_get(game->world, game->player, Position);
-    map_width_px = game->map.width * game->map.tile_size;
-    map_height_px = game->map.height * game->map.tile_size;
-    player_rect = (Rectangle){position->x, position->y, MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE};
+    if (position == NULL) {
+        return (MojaveVec2){0.0f, 0.0f};
+    }
 
-    BeginDrawing();
-    ClearBackground((Color){205, 197, 176, 255});
+    return (MojaveVec2){position->x, position->y};
+}
 
-    BeginMode2D(game->camera);
-    mojave_draw_map(&game->map);
-    DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
-    DrawRectangleLinesEx(player_rect, 2.0f, (Color){14, 37, 58, 255});
-    DrawRectangleLines(0, 0, map_width_px, map_height_px, BLACK);
-    EndMode2D();
+float mojave_game_player_size(void) {
+    return MOJAVE_PLAYER_SIZE;
+}
 
-    DrawRectangle(12, 12, 300, 102, Fade(RAYWHITE, 0.85f));
-    DrawRectangleLines(12, 12, 300, 102, DARKGRAY);
-    DrawText(game->map.name, 24, 24, 20, BLACK);
-    DrawText("Move: WASD / Arrows", 24, 52, 18, BLACK);
-    DrawText("Save: F5   Load: F9", 24, 74, 18, BLACK);
-    DrawText(game->save_loaded ? "Save file found" : "No save loaded yet", 24, 96, 18, DARKGRAY);
+bool mojave_game_save_loaded(const MojaveGame *game) {
+    if (game == NULL) {
+        return false;
+    }
 
-    EndDrawing();
+    return game->save_loaded;
 }
