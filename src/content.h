@@ -5,9 +5,39 @@
 
 #define MOJAVE_MAP_NAME_MAX 64
 
+typedef enum MojaveEventActionType {
+    MOJAVE_EVENT_ACTION_NONE = 0,
+    MOJAVE_EVENT_ACTION_SET_FLAG,
+    MOJAVE_EVENT_ACTION_START_QUEST,
+    MOJAVE_EVENT_ACTION_SET_QUEST_STAGE,
+    MOJAVE_EVENT_ACTION_COMPLETE_QUEST,
+} MojaveEventActionType;
+
+typedef struct MojaveEventAction {
+    MojaveEventActionType type;
+    char *flag_id;
+    bool flag_value;
+    char *quest_id;
+    int quest_stage;
+} MojaveEventAction;
+
+typedef struct MojaveQuestDefinition {
+    char *id;
+    char *title;
+    char **stages;
+    int stage_count;
+} MojaveQuestDefinition;
+
+typedef struct MojaveQuestLog {
+    MojaveQuestDefinition *quests;
+    int quest_count;
+} MojaveQuestLog;
+
 typedef struct MojaveDialogueChoice {
     char *text;
     char *next_id;
+    MojaveEventAction *actions;
+    int action_count;
 } MojaveDialogueChoice;
 
 typedef struct MojaveDialogueNode {
@@ -15,6 +45,8 @@ typedef struct MojaveDialogueNode {
     char *speaker;
     char *text;
     char *next_id;
+    MojaveEventAction *actions;
+    int action_count;
     MojaveDialogueChoice *choices;
     int choice_count;
     bool is_end;
@@ -64,6 +96,9 @@ typedef struct MojaveMap {
 
 bool mojave_map_load(const char *path, MojaveMap *map);
 void mojave_map_unload(MojaveMap *map);
+bool mojave_quest_log_load(const char *path, MojaveQuestLog *quest_log);
+void mojave_quest_log_unload(MojaveQuestLog *quest_log);
+const MojaveQuestDefinition *mojave_quest_log_find(const MojaveQuestLog *quest_log, const char *id);
 bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue);
 void mojave_dialogue_unload(MojaveDialogue *dialogue);
 const MojaveDialogueNode *mojave_dialogue_find_node(const MojaveDialogue *dialogue, const char *id);

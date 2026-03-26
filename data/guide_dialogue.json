@@ -5,10 +5,32 @@
       "id": "intro",
       "speaker": "Guide",
       "text": "Welcome to Mojave. What do you want to know?",
+      "actions": [
+        { "type": "start_quest", "quest": "prototype_orientation" }
+      ],
       "choices": [
-        { "text": "> What is this place?", "next": "place" },
-        { "text": "> Why JSON dialogue?", "next": "data" },
-        { "text": "> I am done.", "next": "end" }
+        {
+          "text": "> What is this place?",
+          "next": "place",
+          "actions": [
+            { "type": "set_quest_stage", "quest": "prototype_orientation", "stage": 1 }
+          ]
+        },
+        {
+          "text": "> Why JSON dialogue?",
+          "next": "data",
+          "actions": [
+            { "type": "set_flag", "flag": "asked_about_data", "value": true }
+          ]
+        },
+        {
+          "text": "> I am done.",
+          "next": "end",
+          "actions": [
+            { "type": "complete_quest", "quest": "prototype_orientation" },
+            { "type": "set_flag", "flag": "met_guide", "value": true }
+          ]
+        }
       ]
     },
     {

@@ -1,0 +1,8 @@
+CompileFlags:
+  Add:
+    - -std=c99
+    - -I./src
+    - -I./flecs/distr
+    - -D_POSIX_C_SOURCE=200809L
+    - -DFLECS_CUSTOM_BUILD
+    - -DFLECS_OS_API_IMPL

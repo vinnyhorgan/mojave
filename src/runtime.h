@@ -20,6 +20,7 @@ typedef struct MojaveInput {
     bool interact_pressed;
     bool menu_up_pressed;
     bool menu_down_pressed;
+    bool quest_log_pressed;
 } MojaveInput;
 
 typedef struct Position {
@@ -32,11 +33,28 @@ typedef struct Velocity {
     float y;
 } Velocity;
 
+typedef struct MojaveFlagState {
+    char *id;
+    bool value;
+} MojaveFlagState;
+
+typedef struct MojaveQuestState {
+    const MojaveQuestDefinition *definition;
+    int stage;
+    bool active;
+    bool completed;
+} MojaveQuestState;
+
 typedef struct MojaveGame {
     ecs_world_t *world;
     ecs_entity_t player;
     MojaveMap map;
     MojaveDialogue dialogue;
+    MojaveQuestLog quest_log;
+    MojaveQuestState *quest_states;
+    int quest_state_count;
+    MojaveFlagState *flags;
+    int flag_count;
     const char *save_path;
     bool save_loaded;
     const MojaveDialogueNode *active_dialogue_node;
@@ -62,5 +80,9 @@ int mojave_game_dialogue_selected_choice(const MojaveGame *game);
 int mojave_game_nearby_npc_index(const MojaveGame *game);
 int mojave_game_npc_count(const MojaveGame *game);
 const MojaveNpc *mojave_game_npc(const MojaveGame *game, int index);
+int mojave_game_active_quest_count(const MojaveGame *game);
+const MojaveQuestState *mojave_game_active_quest(const MojaveGame *game, int index);
+int mojave_game_completed_quest_count(const MojaveGame *game);
+const MojaveQuestState *mojave_game_completed_quest(const MojaveGame *game, int index);
 
 #endif

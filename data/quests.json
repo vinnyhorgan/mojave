@@ -1,0 +1,13 @@
+{
+  "quests": [
+    {
+      "id": "prototype_orientation",
+      "title": "Prototype Orientation",
+      "stages": [
+        "Speak with the guide.",
+        "Ask what this place is.",
+        "Wrap up the conversation."
+      ]
+    }
+  ]
+}

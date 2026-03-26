@@ -6,6 +6,7 @@
 
 static Camera2D g_camera;
 static const float MOJAVE_CAMERA_ZOOM = 2.0f;
+static bool g_show_quest_log;
 
 static Color mojave_floor_color(void) {
     return (Color){60, 92, 65, 255};
@@ -124,6 +125,65 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
     }
 }
 
+static void mojave_backend_draw_quest_log(const MojaveGame *game) {
+    int active_count;
+    int completed_count;
+    int y;
+    int i;
+
+    if (!g_show_quest_log) {
+        return;
+    }
+
+    active_count = mojave_game_active_quest_count(game);
+    completed_count = mojave_game_completed_quest_count(game);
+    y = 72;
+
+    DrawRectangle(120, 56, GetScreenWidth() - 240, GetScreenHeight() - 112, Fade((Color){28, 24, 18, 255}, 0.94f));
+    DrawRectangleLines(120, 56, GetScreenWidth() - 240, GetScreenHeight() - 112, (Color){204, 188, 154, 255});
+    DrawText("Quest Log", 148, 78, 20, (Color){232, 214, 170, 255});
+    DrawText("Close: J / Tab", GetScreenWidth() - 300, 78, 20, LIGHTGRAY);
+
+    y += 42;
+    DrawText("Active", 148, y, 20, GOLD);
+    y += 28;
+    if (active_count == 0) {
+        DrawText("No active quests", 164, y, 20, LIGHTGRAY);
+        y += 28;
+    }
+    for (i = 0; i < active_count; i += 1) {
+        const MojaveQuestState *quest = mojave_game_active_quest(game, i);
+
+        if (quest == NULL || quest->definition == NULL) {
+            continue;
+        }
+        DrawText(quest->definition->title, 164, y, 20, RAYWHITE);
+        y += 24;
+        if (quest->stage >= 0 && quest->stage < quest->definition->stage_count) {
+            DrawText(quest->definition->stages[quest->stage], 184, y, 20, (Color){188, 202, 177, 255});
+            y += 28;
+        }
+        y += 6;
+    }
+
+    y += 12;
+    DrawText("Completed", 148, y, 20, (Color){155, 197, 149, 255});
+    y += 28;
+    if (completed_count == 0) {
+        DrawText("No completed quests", 164, y, 20, LIGHTGRAY);
+        return;
+    }
+    for (i = 0; i < completed_count; i += 1) {
+        const MojaveQuestState *quest = mojave_game_completed_quest(game, i);
+
+        if (quest == NULL || quest->definition == NULL) {
+            continue;
+        }
+        DrawText(quest->definition->title, 164, y, 20, (Color){185, 220, 178, 255});
+        y += 24;
+    }
+}
+
 bool mojave_backend_init(const MojaveBackendConfig *config) {
     if (config == NULL) {
         return false;
@@ -140,6 +200,7 @@ bool mojave_backend_init(const MojaveBackendConfig *config) {
         mojave_backend_snap((float)config->window_height * 0.5f)
     };
     g_camera.target = (Vector2){0.0f, 0.0f};
+    g_show_quest_log = false;
     return true;
 }
 
@@ -156,7 +217,16 @@ float mojave_backend_frame_time(void) {
 }
 
 MojaveInput mojave_backend_poll_input(void) {
-    MojaveInput input = {0.0f, 0.0f, false, false, false, false, false};
+    MojaveInput input = {0.0f, 0.0f, false, false, false, false, false, false};
+
+    input.quest_log_pressed = IsKeyPressed(KEY_J) || IsKeyPressed(KEY_TAB);
+    if (input.quest_log_pressed) {
+        g_show_quest_log = !g_show_quest_log;
+    }
+
+    if (g_show_quest_log) {
+        return input;
+    }
 
     if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) {
         input.move_x -= 1.0f;
@@ -181,8 +251,10 @@ MojaveInput mojave_backend_poll_input(void) {
 
 void mojave_backend_draw(const MojaveGame *game) {
     const MojaveMap *map;
+    const MojaveQuestState *active_quest;
     MojaveVec2 player_position;
     float player_size;
+    int quest_title_width;
     int map_width_px;
     int map_height_px;
     Rectangle player_rect;
@@ -192,6 +264,7 @@ void mojave_backend_draw(const MojaveGame *game) {
     }
 
     map = mojave_game_map(game);
+    active_quest = mojave_game_active_quest(game, 0);
     player_position = mojave_game_player_position(game);
     player_size = mojave_game_player_size();
 
@@ -213,14 +286,24 @@ void mojave_backend_draw(const MojaveGame *game) {
     mojave_backend_draw_rect_outline((Rectangle){0.0f, 0.0f, (float)map_width_px, (float)map_height_px}, 1, BLACK);
     EndMode2D();
 
-    DrawRectangle(12, 12, 300, 112, Fade(RAYWHITE, 0.85f));
-    DrawRectangleLines(12, 12, 300, 112, DARKGRAY);
+    DrawRectangle(12, 12, 420, 126, Fade(RAYWHITE, 0.85f));
+    DrawRectangleLines(12, 12, 420, 126, DARKGRAY);
     DrawText(map->name, 24, 24, 20, BLACK);
     DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
     DrawText("Talk: Enter / Space / E", 24, 74, 20, BLACK);
-    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 24, 96, 20, DARKGRAY);
+    DrawText("Quests: J / Tab", 24, 96, 20, BLACK);
+    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 240, 96, 20, DARKGRAY);
+    if (!g_show_quest_log && active_quest != NULL && active_quest->definition != NULL && active_quest->stage >= 0 &&
+        active_quest->stage < active_quest->definition->stage_count) {
+        quest_title_width = MeasureText(active_quest->definition->title, 20);
+        DrawRectangle(12, 146, 520, 56, Fade(RAYWHITE, 0.85f));
+        DrawRectangleLines(12, 146, 520, 56, DARKGRAY);
+        DrawText(active_quest->definition->title, 24, 160, 20, MAROON);
+        DrawText(active_quest->definition->stages[active_quest->stage], 36 + quest_title_width, 160, 20, DARKBROWN);
+    }
 
     mojave_backend_draw_dialogue(game);
+    mojave_backend_draw_quest_log(game);
 
     EndDrawing();
 }

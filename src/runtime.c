@@ -3,12 +3,14 @@
 #include "collision.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 static const float MOJAVE_PLAYER_SIZE = 18.0f;
 static const float MOJAVE_PLAYER_SPEED = 180.0f;
 static const float MOJAVE_NPC_SIZE = 18.0f;
 static const float MOJAVE_NPC_INTERACT_RANGE = 42.0f;
+static const char *MOJAVE_QUEST_LOG_PATH = "data/quests.json";
 
 ECS_COMPONENT_DECLARE(Position) = 0;
 ECS_COMPONENT_DECLARE(Velocity) = 0;
@@ -64,6 +66,141 @@ static float mojave_npc_world_x(const MojaveMap *map, const MojaveNpc *npc) {
 
 static float mojave_npc_world_y(const MojaveMap *map, const MojaveNpc *npc) {
     return (float)(npc->spawn_y * map->tile_size + 7);
+}
+
+static MojaveFlagState *mojave_game_get_flag(MojaveGame *game, const char *flag_id) {
+    int i;
+
+    if (game == NULL || flag_id == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < game->flag_count; i += 1) {
+        if (strcmp(game->flags[i].id, flag_id) == 0) {
+            return &game->flags[i];
+        }
+    }
+
+    return NULL;
+}
+
+static bool mojave_game_set_flag(MojaveGame *game, const char *flag_id, bool value) {
+    MojaveFlagState *flag;
+    MojaveFlagState *flags;
+
+    if (game == NULL || flag_id == NULL) {
+        return false;
+    }
+
+    flag = mojave_game_get_flag(game, flag_id);
+    if (flag != NULL) {
+        flag->value = value;
+        return true;
+    }
+
+    flags = realloc(game->flags, (size_t)(game->flag_count + 1) * sizeof(*game->flags));
+    if (flags == NULL) {
+        return false;
+    }
+    game->flags = flags;
+
+    game->flags[game->flag_count].id = malloc(strlen(flag_id) + 1);
+    if (game->flags[game->flag_count].id == NULL) {
+        return false;
+    }
+    strcpy(game->flags[game->flag_count].id, flag_id);
+    game->flags[game->flag_count].value = value;
+    game->flag_count += 1;
+    return true;
+}
+
+static MojaveQuestState *mojave_game_find_quest_state(MojaveGame *game, const char *quest_id) {
+    int i;
+
+    if (game == NULL || quest_id == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        if (game->quest_states[i].definition != NULL && strcmp(game->quest_states[i].definition->id, quest_id) == 0) {
+            return &game->quest_states[i];
+        }
+    }
+
+    return NULL;
+}
+
+static void mojave_game_start_quest(MojaveGame *game, const char *quest_id) {
+    MojaveQuestState *quest_state = mojave_game_find_quest_state(game, quest_id);
+
+    if (quest_state == NULL || quest_state->completed) {
+        return;
+    }
+
+    quest_state->active = true;
+    if (quest_state->stage < 0) {
+        quest_state->stage = 0;
+    }
+}
+
+static void mojave_game_set_quest_stage(MojaveGame *game, const char *quest_id, int stage) {
+    MojaveQuestState *quest_state = mojave_game_find_quest_state(game, quest_id);
+
+    if (quest_state == NULL || quest_state->definition == NULL || quest_state->completed) {
+        return;
+    }
+
+    if (stage < 0) {
+        stage = 0;
+    }
+    if (stage >= quest_state->definition->stage_count) {
+        stage = quest_state->definition->stage_count - 1;
+    }
+
+    quest_state->active = true;
+    quest_state->stage = stage;
+}
+
+static void mojave_game_complete_quest(MojaveGame *game, const char *quest_id) {
+    MojaveQuestState *quest_state = mojave_game_find_quest_state(game, quest_id);
+
+    if (quest_state == NULL || quest_state->definition == NULL) {
+        return;
+    }
+
+    quest_state->completed = true;
+    quest_state->active = false;
+    if (quest_state->definition->stage_count > 0) {
+        quest_state->stage = quest_state->definition->stage_count - 1;
+    }
+}
+
+static void mojave_game_run_actions(MojaveGame *game, const MojaveEventAction *actions, int action_count) {
+    int i;
+
+    if (game == NULL || actions == NULL) {
+        return;
+    }
+
+    for (i = 0; i < action_count; i += 1) {
+        switch (actions[i].type) {
+            case MOJAVE_EVENT_ACTION_SET_FLAG:
+                mojave_game_set_flag(game, actions[i].flag_id, actions[i].flag_value);
+                break;
+            case MOJAVE_EVENT_ACTION_START_QUEST:
+                mojave_game_start_quest(game, actions[i].quest_id);
+                break;
+            case MOJAVE_EVENT_ACTION_SET_QUEST_STAGE:
+                mojave_game_set_quest_stage(game, actions[i].quest_id, actions[i].quest_stage);
+                break;
+            case MOJAVE_EVENT_ACTION_COMPLETE_QUEST:
+                mojave_game_complete_quest(game, actions[i].quest_id);
+                break;
+            case MOJAVE_EVENT_ACTION_NONE:
+            default:
+                break;
+        }
+    }
 }
 
 static int mojave_game_find_nearby_npc(const MojaveGame *game) {
@@ -128,6 +265,9 @@ static void mojave_game_set_dialogue_node(MojaveGame *game, const char *node_id)
     node = mojave_dialogue_find_node(&game->dialogue, node_id);
     game->active_dialogue_node = node;
     game->selected_dialogue_choice = 0;
+    if (node != NULL) {
+        mojave_game_run_actions(game, node->actions, node->action_count);
+    }
 }
 
 static void mojave_game_start_dialogue(MojaveGame *game) {
@@ -191,6 +331,11 @@ static void mojave_game_update_dialogue(MojaveGame *game, const MojaveInput *inp
     }
 
     if (node->choice_count > 0) {
+        mojave_game_run_actions(
+            game,
+            node->choices[game->selected_dialogue_choice].actions,
+            node->choices[game->selected_dialogue_choice].action_count
+        );
         mojave_game_set_dialogue_node(game, node->choices[game->selected_dialogue_choice].next_id);
     } else if (node->next_id != NULL) {
         mojave_game_set_dialogue_node(game, node->next_id);
@@ -207,6 +352,7 @@ static void mojave_game_update_dialogue(MojaveGame *game, const MojaveInput *inp
 
 bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_path) {
     Position *position;
+    int i;
 
     if (game == NULL) {
         return false;
@@ -219,14 +365,33 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
         return false;
     }
 
+    if (!mojave_quest_log_load(MOJAVE_QUEST_LOG_PATH, &game->quest_log)) {
+        mojave_map_unload(&game->map);
+        return false;
+    }
+
     game->world = ecs_init();
     if (game->world == NULL) {
+        mojave_quest_log_unload(&game->quest_log);
         mojave_map_unload(&game->map);
         return false;
     }
 
     game->active_npc_index = -1;
     game->nearby_npc_index = -1;
+    game->quest_state_count = game->quest_log.quest_count;
+    game->quest_states = calloc((size_t)game->quest_state_count, sizeof(*game->quest_states));
+    if (game->quest_states == NULL && game->quest_state_count > 0) {
+        ecs_fini(game->world);
+        game->world = NULL;
+        mojave_quest_log_unload(&game->quest_log);
+        mojave_map_unload(&game->map);
+        return false;
+    }
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        game->quest_states[i].definition = &game->quest_log.quests[i];
+        game->quest_states[i].stage = -1;
+    }
 
     ECS_COMPONENT_DEFINE(game->world, Position);
     ECS_COMPONENT_DEFINE(game->world, Velocity);
@@ -256,7 +421,21 @@ void mojave_game_shutdown(MojaveGame *game) {
         game->world = NULL;
     }
 
+    if (game->flags != NULL) {
+        int i;
+
+        for (i = 0; i < game->flag_count; i += 1) {
+            free(game->flags[i].id);
+        }
+        free(game->flags);
+        game->flags = NULL;
+        game->flag_count = 0;
+    }
+    free(game->quest_states);
+    game->quest_states = NULL;
+    game->quest_state_count = 0;
     mojave_dialogue_unload(&game->dialogue);
+    mojave_quest_log_unload(&game->quest_log);
     mojave_map_unload(&game->map);
 }
 
@@ -375,4 +554,80 @@ const MojaveNpc *mojave_game_npc(const MojaveGame *game, int index) {
     }
 
     return &game->map.npcs[index];
+}
+
+int mojave_game_active_quest_count(const MojaveGame *game) {
+    int count = 0;
+    int i;
+
+    if (game == NULL) {
+        return 0;
+    }
+
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        if (game->quest_states[i].active) {
+            count += 1;
+        }
+    }
+
+    return count;
+}
+
+const MojaveQuestState *mojave_game_active_quest(const MojaveGame *game, int index) {
+    int active_index = 0;
+    int i;
+
+    if (game == NULL || index < 0) {
+        return NULL;
+    }
+
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        if (!game->quest_states[i].active) {
+            continue;
+        }
+        if (active_index == index) {
+            return &game->quest_states[i];
+        }
+        active_index += 1;
+    }
+
+    return NULL;
+}
+
+int mojave_game_completed_quest_count(const MojaveGame *game) {
+    int count = 0;
+    int i;
+
+    if (game == NULL) {
+        return 0;
+    }
+
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        if (game->quest_states[i].completed) {
+            count += 1;
+        }
+    }
+
+    return count;
+}
+
+const MojaveQuestState *mojave_game_completed_quest(const MojaveGame *game, int index) {
+    int completed_index = 0;
+    int i;
+
+    if (game == NULL || index < 0) {
+        return NULL;
+    }
+
+    for (i = 0; i < game->quest_state_count; i += 1) {
+        if (!game->quest_states[i].completed) {
+            continue;
+        }
+        if (completed_index == index) {
+            return &game->quest_states[i];
+        }
+        completed_index += 1;
+    }
+
+    return NULL;
 }
