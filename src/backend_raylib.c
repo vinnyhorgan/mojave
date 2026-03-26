@@ -1,6 +1,8 @@
 #include "backend.h"
 
+#include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 #include <raylib.h>
 
@@ -35,6 +37,38 @@ static void mojave_backend_draw_rect_outline(Rectangle rect, int thickness, Colo
     DrawRectangle((int)rect.x, (int)(rect.y + rect.height - thickness), (int)rect.width, thickness, color);
     DrawRectangle((int)rect.x, (int)rect.y, thickness, (int)rect.height, color);
     DrawRectangle((int)(rect.x + rect.width - thickness), (int)rect.y, thickness, (int)rect.height, color);
+}
+
+static void mojave_backend_draw_text_fitted(const char *text, int x, int y, int font_size, int max_width, Color color) {
+    char buffer[512];
+    size_t length;
+
+    if (text == NULL || max_width <= 0) {
+        return;
+    }
+
+    if (MeasureText(text, font_size) <= max_width) {
+        DrawText(text, x, y, font_size, color);
+        return;
+    }
+
+    length = strlen(text);
+    if (length >= sizeof(buffer)) {
+        length = sizeof(buffer) - 1;
+    }
+    memcpy(buffer, text, length);
+    buffer[length] = '\0';
+
+    while (length > 0) {
+        length -= 1;
+        buffer[length] = '\0';
+        if (MeasureText(TextFormat("%s...", buffer), font_size) <= max_width) {
+            DrawText(TextFormat("%s...", buffer), x, y, font_size, color);
+            return;
+        }
+    }
+
+    DrawText("...", x, y, font_size, color);
 }
 
 static void mojave_backend_update_camera(const MojaveGame *game) {
@@ -138,6 +172,11 @@ static void mojave_backend_draw_items(const MojaveGame *game) {
 static void mojave_backend_draw_dialogue(const MojaveGame *game) {
     const MojaveDialogueNode *node = mojave_game_dialogue_node(game);
     const MojaveDialogueChoice *choice;
+    int box_x = 40;
+    int box_y = GetScreenHeight() - 220;
+    int box_width = GetScreenWidth() - 80;
+    int max_visible_choices = 4;
+    int first_visible_choice = 0;
     int i;
     int selected_choice;
     int visible_choice_count;
@@ -148,17 +187,32 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
 
     selected_choice = mojave_game_dialogue_selected_choice(game);
     visible_choice_count = mojave_game_dialogue_visible_choice_count(game);
-    DrawRectangle(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, Fade(BLACK, 0.88f));
-    DrawRectangleLines(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, RAYWHITE);
-    DrawText(node->speaker, 60, GetScreenHeight() - 200, 20, GOLD);
-    DrawText(node->text, 60, GetScreenHeight() - 168, 20, RAYWHITE);
-
-    for (i = 0; i < visible_choice_count; i += 1) {
-        Color color = i == selected_choice ? GOLD : LIGHTGRAY;
-        choice = mojave_game_dialogue_visible_choice(game, i);
-        if (choice != NULL) {
-            DrawText(choice->text, 80, GetScreenHeight() - 132 + i * 22, 20, color);
+    if (visible_choice_count > max_visible_choices) {
+        first_visible_choice = selected_choice - max_visible_choices / 2;
+        if (first_visible_choice < 0) {
+            first_visible_choice = 0;
         }
+        if (first_visible_choice > visible_choice_count - max_visible_choices) {
+            first_visible_choice = visible_choice_count - max_visible_choices;
+        }
+    }
+    DrawRectangle(box_x, box_y, box_width, 180, Fade(BLACK, 0.88f));
+    DrawRectangleLines(box_x, box_y, box_width, 180, RAYWHITE);
+    mojave_backend_draw_text_fitted(node->speaker, 60, GetScreenHeight() - 200, 20, box_width - 120, GOLD);
+    mojave_backend_draw_text_fitted(node->text, 60, GetScreenHeight() - 168, 20, box_width - 120, RAYWHITE);
+
+    for (i = 0; i < max_visible_choices && first_visible_choice + i < visible_choice_count; i += 1) {
+        int choice_index = first_visible_choice + i;
+        Color color = choice_index == selected_choice ? GOLD : LIGHTGRAY;
+
+        choice = mojave_game_dialogue_visible_choice(game, choice_index);
+        if (choice != NULL) {
+            mojave_backend_draw_text_fitted(choice->text, 80, GetScreenHeight() - 132 + i * 22, 20, box_width - 160, color);
+        }
+    }
+
+    if (visible_choice_count > max_visible_choices) {
+        DrawText("More", box_x + box_width - 72, box_y + 124, 20, LIGHTGRAY);
     }
 
     if (visible_choice_count == 0) {
@@ -169,6 +223,14 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
 static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
     const MojaveMapItem *item;
     const MojaveItemDefinition *definition;
+    const char *hint = "E / Enter / Space";
+    char prompt[256];
+    int panel_x = 12;
+    int panel_y = GetScreenHeight() - 88;
+    int panel_width = 460;
+    int panel_height = 64;
+    int hint_width;
+    int prompt_width;
     int nearby_item_index;
 
     if (g_show_quest_log || g_show_inventory || mojave_game_dialogue_active(game)) {
@@ -190,10 +252,14 @@ static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
         return;
     }
 
-    DrawRectangle(12, GetScreenHeight() - 64, 360, 40, Fade(RAYWHITE, 0.9f));
-    DrawRectangleLines(12, GetScreenHeight() - 64, 360, 40, DARKGRAY);
-    DrawText(TextFormat("Pick up: %s", definition->name), 24, GetScreenHeight() - 52, 20, BLACK);
-    DrawText("E / Enter / Space", 212, GetScreenHeight() - 52, 20, DARKGRAY);
+    snprintf(prompt, sizeof(prompt), "Pick up: %s", definition->name);
+    hint_width = MeasureText(hint, 20);
+    prompt_width = panel_width - 24 - 24;
+
+    DrawRectangle(panel_x, panel_y, panel_width, panel_height, Fade(RAYWHITE, 0.9f));
+    DrawRectangleLines(panel_x, panel_y, panel_width, panel_height, DARKGRAY);
+    mojave_backend_draw_text_fitted(prompt, panel_x + 12, panel_y + 10, 20, prompt_width, BLACK);
+    DrawText(hint, panel_x + panel_width - 12 - hint_width, panel_y + 34, 20, DARKGRAY);
 }
 
 static void mojave_backend_draw_quest_log(const MojaveGame *game) {
