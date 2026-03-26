@@ -43,6 +43,31 @@ static void mojave_backend_draw_map(const MojaveMap *map) {
     }
 }
 
+static void mojave_backend_draw_dialogue(const MojaveGame *game) {
+    const MojaveDialogueNode *node = mojave_game_dialogue_node(game);
+    int i;
+    int selected_choice;
+
+    if (node == NULL) {
+        return;
+    }
+
+    selected_choice = mojave_game_dialogue_selected_choice(game);
+    DrawRectangle(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, Fade(BLACK, 0.88f));
+    DrawRectangleLines(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, RAYWHITE);
+    DrawText(node->speaker, 60, GetScreenHeight() - 200, 20, GOLD);
+    DrawText(node->text, 60, GetScreenHeight() - 168, 20, RAYWHITE);
+
+    for (i = 0; i < node->choice_count; i += 1) {
+        Color color = i == selected_choice ? GOLD : LIGHTGRAY;
+        DrawText(node->choices[i].text, 80, GetScreenHeight() - 132 + i * 22, 20, color);
+    }
+
+    if (node->choice_count == 0) {
+        DrawText("Enter / Space", GetScreenWidth() - 220, GetScreenHeight() - 74, 20, LIGHTGRAY);
+    }
+}
+
 bool mojave_backend_init(const MojaveBackendConfig *config) {
     if (config == NULL) {
         return false;
@@ -72,7 +97,7 @@ float mojave_backend_frame_time(void) {
 }
 
 MojaveInput mojave_backend_poll_input(void) {
-    MojaveInput input = {0.0f, 0.0f, false, false};
+    MojaveInput input = {0.0f, 0.0f, false, false, false, false, false};
 
     if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) {
         input.move_x -= 1.0f;
@@ -89,6 +114,9 @@ MojaveInput mojave_backend_poll_input(void) {
 
     input.save_pressed = IsKeyPressed(KEY_F5);
     input.load_pressed = IsKeyPressed(KEY_F9);
+    input.interact_pressed = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_E);
+    input.menu_up_pressed = IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP);
+    input.menu_down_pressed = IsKeyPressed(KEY_S) || IsKeyPressed(KEY_DOWN);
     return input;
 }
 
@@ -128,8 +156,10 @@ void mojave_backend_draw(const MojaveGame *game) {
     DrawRectangleLines(12, 12, 300, 112, DARKGRAY);
     DrawText(map->name, 24, 24, 20, BLACK);
     DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
-    DrawText("Save: F5   Load: F9", 24, 74, 20, BLACK);
+    DrawText("Talk: Enter / Space", 24, 74, 20, BLACK);
     DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 24, 96, 20, DARKGRAY);
+
+    mojave_backend_draw_dialogue(game);
 
     EndDrawing();
 }

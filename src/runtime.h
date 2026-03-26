@@ -17,6 +17,9 @@ typedef struct MojaveInput {
     float move_y;
     bool save_pressed;
     bool load_pressed;
+    bool interact_pressed;
+    bool menu_up_pressed;
+    bool menu_down_pressed;
 } MojaveInput;
 
 typedef struct Position {
@@ -33,8 +36,11 @@ typedef struct MojaveGame {
     ecs_world_t *world;
     ecs_entity_t player;
     MojaveMap map;
+    MojaveDialogue dialogue;
     const char *save_path;
     bool save_loaded;
+    const MojaveDialogueNode *active_dialogue_node;
+    int selected_dialogue_choice;
 } MojaveGame;
 
 extern ECS_COMPONENT_DECLARE(Position);
@@ -48,5 +54,8 @@ const MojaveMap *mojave_game_map(const MojaveGame *game);
 MojaveVec2 mojave_game_player_position(const MojaveGame *game);
 float mojave_game_player_size(void);
 bool mojave_game_save_loaded(const MojaveGame *game);
+bool mojave_game_dialogue_active(const MojaveGame *game);
+const MojaveDialogueNode *mojave_game_dialogue_node(const MojaveGame *game);
+int mojave_game_dialogue_selected_choice(const MojaveGame *game);
 
 #endif

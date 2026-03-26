@@ -1,0 +1,33 @@
+{
+  "start": "intro",
+  "nodes": [
+    {
+      "id": "intro",
+      "speaker": "Guide",
+      "text": "Welcome to Mojave. What do you want to know?",
+      "choices": [
+        { "text": "> What is this place?", "next": "place" },
+        { "text": "> Why JSON dialogue?", "next": "data" },
+        { "text": "> I am done.", "next": "end" }
+      ]
+    },
+    {
+      "id": "place",
+      "speaker": "Guide",
+      "text": "A tiny prototype yard for testing runtime systems.",
+      "next": "intro"
+    },
+    {
+      "id": "data",
+      "speaker": "Guide",
+      "text": "Because Mojave wants authored data, not script-driven quests.",
+      "next": "intro"
+    },
+    {
+      "id": "end",
+      "speaker": "Guide",
+      "text": "Good. Next we can add conditions, flags, and world hooks.",
+      "end": true
+    }
+  ]
+}

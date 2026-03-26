@@ -15,6 +15,58 @@ static void mojave_map_reset(MojaveMap *map) {
     memset(map, 0, sizeof(*map));
 }
 
+static void mojave_dialogue_node_reset(MojaveDialogueNode *node) {
+    int i;
+
+    if (node == NULL) {
+        return;
+    }
+
+    free(node->id);
+    free(node->speaker);
+    free(node->text);
+    free(node->next_id);
+    for (i = 0; i < node->choice_count; i += 1) {
+        free(node->choices[i].text);
+        free(node->choices[i].next_id);
+    }
+    free(node->choices);
+    memset(node, 0, sizeof(*node));
+}
+
+static void mojave_dialogue_reset(MojaveDialogue *dialogue) {
+    int i;
+
+    if (dialogue == NULL) {
+        return;
+    }
+
+    free(dialogue->start_id);
+    for (i = 0; i < dialogue->node_count; i += 1) {
+        mojave_dialogue_node_reset(&dialogue->nodes[i]);
+    }
+    free(dialogue->nodes);
+    memset(dialogue, 0, sizeof(*dialogue));
+}
+
+static char *mojave_strdup(const char *value) {
+    size_t length;
+    char *copy;
+
+    if (value == NULL) {
+        return NULL;
+    }
+
+    length = strlen(value) + 1;
+    copy = malloc(length);
+    if (copy == NULL) {
+        return NULL;
+    }
+
+    memcpy(copy, value, length);
+    return copy;
+}
+
 static bool mojave_json_read_file(const char *path, yyjson_doc **doc) {
     yyjson_read_err err;
 
@@ -152,6 +204,155 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
 
 void mojave_map_unload(MojaveMap *map) {
     mojave_map_reset(map);
+}
+
+bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
+    yyjson_doc *doc;
+    yyjson_val *root;
+    yyjson_val *start;
+    yyjson_val *nodes;
+    yyjson_arr_iter node_iter;
+    yyjson_val *node_value;
+    int node_index;
+
+    if (path == NULL || dialogue == NULL) {
+        return false;
+    }
+
+    mojave_dialogue_reset(dialogue);
+    if (!mojave_json_read_file(path, &doc)) {
+        return false;
+    }
+
+    root = yyjson_doc_get_root(doc);
+    if (!yyjson_is_obj(root)) {
+        fprintf(stderr, "Dialogue file '%s' must contain a JSON object\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    start = yyjson_obj_get(root, "start");
+    nodes = yyjson_obj_get(root, "nodes");
+    if (!yyjson_is_str(start) || !yyjson_is_arr(nodes)) {
+        fprintf(stderr, "Dialogue file '%s' is missing required fields\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    dialogue->start_id = mojave_strdup(yyjson_get_str(start));
+    if (dialogue->start_id == NULL) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    dialogue->node_count = (int)yyjson_arr_size(nodes);
+    dialogue->nodes = calloc((size_t)dialogue->node_count, sizeof(*dialogue->nodes));
+    if (dialogue->nodes == NULL && dialogue->node_count > 0) {
+        mojave_dialogue_reset(dialogue);
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    node_index = 0;
+    yyjson_arr_iter_init(nodes, &node_iter);
+    while ((node_value = yyjson_arr_iter_next(&node_iter)) != NULL) {
+        MojaveDialogueNode *node = &dialogue->nodes[node_index];
+        yyjson_val *id = yyjson_obj_get(node_value, "id");
+        yyjson_val *speaker = yyjson_obj_get(node_value, "speaker");
+        yyjson_val *text = yyjson_obj_get(node_value, "text");
+        yyjson_val *next = yyjson_obj_get(node_value, "next");
+        yyjson_val *is_end = yyjson_obj_get(node_value, "end");
+        yyjson_val *choices = yyjson_obj_get(node_value, "choices");
+
+        if (!yyjson_is_obj(node_value) || !yyjson_is_str(id) || !yyjson_is_str(speaker) || !yyjson_is_str(text)) {
+            fprintf(stderr, "Dialogue file '%s' contains an invalid node\n", path);
+            mojave_dialogue_reset(dialogue);
+            yyjson_doc_free(doc);
+            return false;
+        }
+
+        node->id = mojave_strdup(yyjson_get_str(id));
+        node->speaker = mojave_strdup(yyjson_get_str(speaker));
+        node->text = mojave_strdup(yyjson_get_str(text));
+        node->next_id = yyjson_is_str(next) ? mojave_strdup(yyjson_get_str(next)) : NULL;
+        node->is_end = yyjson_is_bool(is_end) ? yyjson_get_bool(is_end) : false;
+
+        if (node->id == NULL || node->speaker == NULL || node->text == NULL) {
+            mojave_dialogue_reset(dialogue);
+            yyjson_doc_free(doc);
+            return false;
+        }
+
+        if (choices != NULL) {
+            yyjson_arr_iter choice_iter;
+            yyjson_val *choice_value;
+            int choice_index;
+
+            if (!yyjson_is_arr(choices)) {
+                fprintf(stderr, "Dialogue file '%s' has an invalid choices array\n", path);
+                mojave_dialogue_reset(dialogue);
+                yyjson_doc_free(doc);
+                return false;
+            }
+
+            node->choice_count = (int)yyjson_arr_size(choices);
+            node->choices = calloc((size_t)node->choice_count, sizeof(*node->choices));
+            if (node->choices == NULL && node->choice_count > 0) {
+                mojave_dialogue_reset(dialogue);
+                yyjson_doc_free(doc);
+                return false;
+            }
+
+            choice_index = 0;
+            yyjson_arr_iter_init(choices, &choice_iter);
+            while ((choice_value = yyjson_arr_iter_next(&choice_iter)) != NULL) {
+                yyjson_val *choice_text = yyjson_obj_get(choice_value, "text");
+                yyjson_val *choice_next = yyjson_obj_get(choice_value, "next");
+
+                if (!yyjson_is_obj(choice_value) || !yyjson_is_str(choice_text) || !yyjson_is_str(choice_next)) {
+                    fprintf(stderr, "Dialogue file '%s' has an invalid choice\n", path);
+                    mojave_dialogue_reset(dialogue);
+                    yyjson_doc_free(doc);
+                    return false;
+                }
+
+                node->choices[choice_index].text = mojave_strdup(yyjson_get_str(choice_text));
+                node->choices[choice_index].next_id = mojave_strdup(yyjson_get_str(choice_next));
+                if (node->choices[choice_index].text == NULL || node->choices[choice_index].next_id == NULL) {
+                    mojave_dialogue_reset(dialogue);
+                    yyjson_doc_free(doc);
+                    return false;
+                }
+
+                choice_index += 1;
+            }
+        }
+
+        node_index += 1;
+    }
+
+    yyjson_doc_free(doc);
+    return true;
+}
+
+void mojave_dialogue_unload(MojaveDialogue *dialogue) {
+    mojave_dialogue_reset(dialogue);
+}
+
+const MojaveDialogueNode *mojave_dialogue_find_node(const MojaveDialogue *dialogue, const char *id) {
+    int i;
+
+    if (dialogue == NULL || id == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < dialogue->node_count; i += 1) {
+        if (dialogue->nodes[i].id != NULL && strcmp(dialogue->nodes[i].id, id) == 0) {
+            return &dialogue->nodes[i];
+        }
+    }
+
+    return NULL;
 }
 
 bool mojave_save_write_player(const char *path, float x, float y) {

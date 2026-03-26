@@ -7,6 +7,7 @@
 
 static const float MOJAVE_PLAYER_SIZE = 18.0f;
 static const float MOJAVE_PLAYER_SPEED = 180.0f;
+static const char *MOJAVE_DIALOGUE_PATH = "data/intro_dialogue.json";
 
 ECS_COMPONENT_DECLARE(Position) = 0;
 ECS_COMPONENT_DECLARE(Velocity) = 0;
@@ -56,6 +57,84 @@ static void mojave_move_player(const MojaveMap *map, Position *position, Velocit
     }
 }
 
+static void mojave_game_set_dialogue_node(MojaveGame *game, const char *node_id) {
+    const MojaveDialogueNode *node;
+
+    if (game == NULL || node_id == NULL) {
+        return;
+    }
+
+    node = mojave_dialogue_find_node(&game->dialogue, node_id);
+    game->active_dialogue_node = node;
+    game->selected_dialogue_choice = 0;
+}
+
+static void mojave_game_start_dialogue(MojaveGame *game) {
+    if (game == NULL || game->dialogue.start_id == NULL) {
+        return;
+    }
+
+    mojave_game_set_dialogue_node(game, game->dialogue.start_id);
+}
+
+static void mojave_game_end_dialogue(MojaveGame *game) {
+    if (game == NULL) {
+        return;
+    }
+
+    game->active_dialogue_node = NULL;
+    game->selected_dialogue_choice = 0;
+}
+
+static void mojave_game_update_dialogue(MojaveGame *game, const MojaveInput *input) {
+    const MojaveDialogueNode *node;
+
+    if (game == NULL || input == NULL) {
+        return;
+    }
+
+    node = game->active_dialogue_node;
+    if (node == NULL) {
+        if (input->interact_pressed) {
+            mojave_game_start_dialogue(game);
+        }
+        return;
+    }
+
+    if (node->choice_count > 0) {
+        if (input->menu_up_pressed) {
+            game->selected_dialogue_choice -= 1;
+            if (game->selected_dialogue_choice < 0) {
+                game->selected_dialogue_choice = node->choice_count - 1;
+            }
+        }
+        if (input->menu_down_pressed) {
+            game->selected_dialogue_choice += 1;
+            if (game->selected_dialogue_choice >= node->choice_count) {
+                game->selected_dialogue_choice = 0;
+            }
+        }
+    }
+
+    if (!input->interact_pressed) {
+        return;
+    }
+
+    if (node->choice_count > 0) {
+        mojave_game_set_dialogue_node(game, node->choices[game->selected_dialogue_choice].next_id);
+    } else if (node->next_id != NULL) {
+        mojave_game_set_dialogue_node(game, node->next_id);
+    } else if (node->is_end) {
+        mojave_game_end_dialogue(game);
+    } else {
+        mojave_game_end_dialogue(game);
+    }
+
+    if (game->active_dialogue_node == NULL) {
+        mojave_game_end_dialogue(game);
+    }
+}
+
 bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_path) {
     Position *position;
 
@@ -70,8 +149,14 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
         return false;
     }
 
+    if (!mojave_dialogue_load(MOJAVE_DIALOGUE_PATH, &game->dialogue)) {
+        mojave_map_unload(&game->map);
+        return false;
+    }
+
     game->world = ecs_init();
     if (game->world == NULL) {
+        mojave_dialogue_unload(&game->dialogue);
         mojave_map_unload(&game->map);
         return false;
     }
@@ -104,14 +189,22 @@ void mojave_game_shutdown(MojaveGame *game) {
         game->world = NULL;
     }
 
+    mojave_dialogue_unload(&game->dialogue);
     mojave_map_unload(&game->map);
 }
 
 void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     Position *position;
     Velocity velocity;
+    bool dialogue_was_active;
 
     if (game == NULL || game->world == NULL) {
+        return;
+    }
+
+    dialogue_was_active = game->active_dialogue_node != NULL;
+    mojave_game_update_dialogue(game, input);
+    if (dialogue_was_active || game->active_dialogue_node != NULL) {
         return;
     }
 
@@ -171,4 +264,24 @@ bool mojave_game_save_loaded(const MojaveGame *game) {
     }
 
     return game->save_loaded;
+}
+
+bool mojave_game_dialogue_active(const MojaveGame *game) {
+    return game != NULL && game->active_dialogue_node != NULL;
+}
+
+const MojaveDialogueNode *mojave_game_dialogue_node(const MojaveGame *game) {
+    if (game == NULL) {
+        return NULL;
+    }
+
+    return game->active_dialogue_node;
+}
+
+int mojave_game_dialogue_selected_choice(const MojaveGame *game) {
+    if (game == NULL) {
+        return 0;
+    }
+
+    return game->selected_dialogue_choice;
 }
