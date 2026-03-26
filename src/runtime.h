@@ -77,6 +77,10 @@ typedef struct MojaveGame {
 extern ECS_COMPONENT_DECLARE(Position);
 extern ECS_COMPONENT_DECLARE(Velocity);
 
+extern const float MOJAVE_PLAYER_SIZE;
+extern const float MOJAVE_NPC_SIZE;
+extern const float MOJAVE_ITEM_SIZE;
+
 bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_path);
 void mojave_game_shutdown(MojaveGame *game);
 void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt);

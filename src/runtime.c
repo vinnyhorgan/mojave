@@ -9,10 +9,10 @@
 
 #include <yyjson.h>
 
-static const float MOJAVE_PLAYER_SIZE = 18.0f;
-static const float MOJAVE_PLAYER_SPEED = 180.0f;
-static const float MOJAVE_NPC_SIZE = 18.0f;
-static const float MOJAVE_ITEM_SIZE = 12.0f;
+const float MOJAVE_PLAYER_SIZE = 18.0f;
+const float MOJAVE_PLAYER_SPEED = 180.0f;
+const float MOJAVE_NPC_SIZE = 18.0f;
+const float MOJAVE_ITEM_SIZE = 12.0f;
 static const float MOJAVE_NPC_INTERACT_RANGE = 42.0f;
 static const float MOJAVE_ITEM_PICKUP_RANGE = 30.0f;
 static const char *MOJAVE_ITEM_DATABASE_PATH = "data/items.json";
@@ -104,6 +104,7 @@ static MojaveFlagState *mojave_game_get_flag(MojaveGame *game, const char *flag_
 static bool mojave_game_set_flag(MojaveGame *game, const char *flag_id, bool value) {
     MojaveFlagState *flag;
     MojaveFlagState *flags;
+    MojaveFlagState *old_flags;
 
     if (game == NULL || flag_id == NULL) {
         return false;
@@ -115,6 +116,7 @@ static bool mojave_game_set_flag(MojaveGame *game, const char *flag_id, bool val
         return true;
     }
 
+    old_flags = game->flags;
     flags = realloc(game->flags, (size_t)(game->flag_count + 1) * sizeof(*game->flags));
     if (flags == NULL) {
         return false;
@@ -123,9 +125,11 @@ static bool mojave_game_set_flag(MojaveGame *game, const char *flag_id, bool val
 
     game->flags[game->flag_count].id = malloc(strlen(flag_id) + 1);
     if (game->flags[game->flag_count].id == NULL) {
+        game->flags = old_flags;
+        free(flags);
         return false;
     }
-    strcpy(game->flags[game->flag_count].id, flag_id);
+    memcpy(game->flags[game->flag_count].id, flag_id, strlen(flag_id) + 1);
     game->flags[game->flag_count].value = value;
     game->flag_count += 1;
     return true;
@@ -168,9 +172,12 @@ static void mojave_game_set_quest_stage(MojaveGame *game, const char *quest_id, 
     }
 
     if (stage < 0) {
+        fprintf(stderr, "Quest '%s' stage %d is negative, clamping to 0\n", quest_id, stage);
         stage = 0;
     }
     if (stage >= quest_state->definition->stage_count) {
+        fprintf(stderr, "Quest '%s' stage %d exceeds max %d, clamping to %d\n",
+            quest_id, stage, quest_state->definition->stage_count - 1, quest_state->definition->stage_count - 1);
         stage = quest_state->definition->stage_count - 1;
     }
 
@@ -539,10 +546,6 @@ static bool mojave_game_read_save(MojaveGame *game, float *player_x, float *play
         return false;
     }
 
-    if (!mojave_save_read_player(game->save_path, player_x, player_y)) {
-        return false;
-    }
-
     doc = yyjson_read_file(game->save_path, 0, NULL, NULL);
     if (doc == NULL) {
         return false;
@@ -552,6 +555,9 @@ static bool mojave_game_read_save(MojaveGame *game, float *player_x, float *play
         yyjson_doc_free(doc);
         return false;
     }
+
+    *player_x = (float)yyjson_get_real(yyjson_obj_get(root, "player_x"));
+    *player_y = (float)yyjson_get_real(yyjson_obj_get(root, "player_y"));
 
     flags = yyjson_obj_get(root, "flags");
     if (yyjson_is_arr(flags)) {

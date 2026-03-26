@@ -8,6 +8,8 @@
 
 static Camera2D g_camera;
 static const float MOJAVE_CAMERA_ZOOM = 2.0f;
+static const int MOJAVE_DIALOG_BOX_OFFSET_Y = 220;
+static const int MOJAVE_DIALOG_BOX_HEIGHT = 180;
 static bool g_show_quest_log;
 static bool g_show_inventory;
 
@@ -123,8 +125,8 @@ static void mojave_backend_draw_npcs(const MojaveGame *game) {
 
         rect.x = (float)(npc->spawn_x * map->tile_size + 7);
         rect.y = (float)(npc->spawn_y * map->tile_size + 7);
-        rect.width = 18.0f;
-        rect.height = 18.0f;
+        rect.width = MOJAVE_NPC_SIZE;
+        rect.height = MOJAVE_NPC_SIZE;
         rect = mojave_backend_snap_rect(rect);
         fill_color = (Color){npc->outfit_r, npc->outfit_g, npc->outfit_b, 255};
         outline_color = i == nearby_npc_index ? (Color){236, 204, 110, 255} : (Color){45, 31, 26, 255};
@@ -158,8 +160,8 @@ static void mojave_backend_draw_items(const MojaveGame *game) {
 
         rect.x = (float)(item->spawn_x * map->tile_size + 10);
         rect.y = (float)(item->spawn_y * map->tile_size + 10);
-        rect.width = 12.0f;
-        rect.height = 12.0f;
+        rect.width = MOJAVE_ITEM_SIZE;
+        rect.height = MOJAVE_ITEM_SIZE;
         rect = mojave_backend_snap_rect(rect);
         fill_color = (Color){definition->color_r, definition->color_g, definition->color_b, 255};
         outline_color = i == nearby_item_index ? GOLD : (Color){53, 42, 31, 255};
@@ -173,7 +175,7 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
     const MojaveDialogueNode *node = mojave_game_dialogue_node(game);
     const MojaveDialogueChoice *choice;
     int box_x = 40;
-    int box_y = GetScreenHeight() - 220;
+    int box_y = GetScreenHeight() - MOJAVE_DIALOG_BOX_OFFSET_Y;
     int box_width = GetScreenWidth() - 80;
     int max_visible_choices = 4;
     int first_visible_choice = 0;
@@ -196,8 +198,8 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
             first_visible_choice = visible_choice_count - max_visible_choices;
         }
     }
-    DrawRectangle(box_x, box_y, box_width, 180, Fade(BLACK, 0.88f));
-    DrawRectangleLines(box_x, box_y, box_width, 180, RAYWHITE);
+    DrawRectangle(box_x, box_y, box_width, MOJAVE_DIALOG_BOX_HEIGHT, Fade(BLACK, 0.88f));
+    DrawRectangleLines(box_x, box_y, box_width, MOJAVE_DIALOG_BOX_HEIGHT, RAYWHITE);
     mojave_backend_draw_text_fitted(node->speaker, 60, GetScreenHeight() - 200, 20, box_width - 120, GOLD);
     mojave_backend_draw_text_fitted(node->text, 60, GetScreenHeight() - 168, 20, box_width - 120, RAYWHITE);
 

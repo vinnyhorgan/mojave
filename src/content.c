@@ -143,6 +143,7 @@ static bool mojave_json_read_rgb(yyjson_val *value, unsigned char *out_r, unsign
     yyjson_val *r;
     yyjson_val *g;
     yyjson_val *b;
+    int ri, gi, bi;
 
     if (!yyjson_is_obj(value)) {
         return false;
@@ -155,9 +156,16 @@ static bool mojave_json_read_rgb(yyjson_val *value, unsigned char *out_r, unsign
         return false;
     }
 
-    *out_r = (unsigned char)yyjson_get_int(r);
-    *out_g = (unsigned char)yyjson_get_int(g);
-    *out_b = (unsigned char)yyjson_get_int(b);
+    ri = (int)yyjson_get_int(r);
+    gi = (int)yyjson_get_int(g);
+    bi = (int)yyjson_get_int(b);
+    if (ri < 0 || ri > 255 || gi < 0 || gi > 255 || bi < 0 || bi > 255) {
+        return false;
+    }
+
+    *out_r = (unsigned char)ri;
+    *out_g = (unsigned char)gi;
+    *out_b = (unsigned char)bi;
     return true;
 }
 
@@ -429,6 +437,11 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
 
     if (map->width <= 0 || map->height <= 0 || map->tile_size <= 0) {
         fprintf(stderr, "Map file '%s' has invalid dimensions\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
+    if (map->width > 1024 || map->height > 1024) {
+        fprintf(stderr, "Map file '%s' has excessively large dimensions (%dx%d)\n", path, map->width, map->height);
         yyjson_doc_free(doc);
         return false;
     }
@@ -759,6 +772,7 @@ bool mojave_quest_log_load(const char *path, MojaveQuestLog *quest_log) {
 
         if (!yyjson_is_obj(quest_value) || !yyjson_is_str(id) || !yyjson_is_str(title) || !yyjson_is_arr(stages)) {
             fprintf(stderr, "Quest file '%s' contains an invalid quest\n", path);
+            quest_log->quest_count = quest_index;
             mojave_quest_log_reset(quest_log);
             yyjson_doc_free(doc);
             return false;
@@ -769,6 +783,7 @@ bool mojave_quest_log_load(const char *path, MojaveQuestLog *quest_log) {
         quest->stage_count = (int)yyjson_arr_size(stages);
         quest->stages = calloc((size_t)quest->stage_count, sizeof(*quest->stages));
         if (quest->id == NULL || quest->title == NULL || (quest->stages == NULL && quest->stage_count > 0)) {
+            quest_log->quest_count = quest_index;
             mojave_quest_log_reset(quest_log);
             yyjson_doc_free(doc);
             return false;
@@ -778,12 +793,14 @@ bool mojave_quest_log_load(const char *path, MojaveQuestLog *quest_log) {
         yyjson_arr_iter_init(stages, &stage_iter);
         while ((stage_value = yyjson_arr_iter_next(&stage_iter)) != NULL) {
             if (!yyjson_is_str(stage_value)) {
+                quest_log->quest_count = quest_index;
                 mojave_quest_log_reset(quest_log);
                 yyjson_doc_free(doc);
                 return false;
             }
             quest->stages[stage_index] = mojave_strdup(yyjson_get_str(stage_value));
             if (quest->stages[stage_index] == NULL) {
+                quest_log->quest_count = quest_index;
                 mojave_quest_log_reset(quest_log);
                 yyjson_doc_free(doc);
                 return false;
@@ -894,6 +911,7 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
         if (node->id == NULL || node->speaker == NULL || node->text == NULL ||
             !mojave_conditions_load(conditions, &node->conditions, &node->condition_count) ||
             !mojave_event_actions_load(actions, &node->actions, &node->action_count)) {
+            dialogue->node_count = node_index;
             mojave_dialogue_reset(dialogue);
             yyjson_doc_free(doc);
             return false;
@@ -945,6 +963,7 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
                         choice_actions,
                         &node->choices[choice_index].actions,
                         &node->choices[choice_index].action_count)) {
+                    dialogue->node_count = node_index;
                     mojave_dialogue_reset(dialogue);
                     yyjson_doc_free(doc);
                     return false;
