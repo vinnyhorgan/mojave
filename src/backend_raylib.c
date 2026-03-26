@@ -7,6 +7,7 @@
 static Camera2D g_camera;
 static const float MOJAVE_CAMERA_ZOOM = 2.0f;
 static bool g_show_quest_log;
+static bool g_show_inventory;
 
 static Color mojave_floor_color(void) {
     return (Color){60, 92, 65, 255};
@@ -100,29 +101,99 @@ static void mojave_backend_draw_npcs(const MojaveGame *game) {
     }
 }
 
+static void mojave_backend_draw_items(const MojaveGame *game) {
+    const MojaveMap *map = mojave_game_map(game);
+    int nearby_item_index = mojave_game_nearby_item_index(game);
+    int i;
+
+    for (i = 0; i < mojave_game_map_item_count(game); i += 1) {
+        const MojaveMapItem *item = mojave_game_map_item(game, i);
+        const MojaveItemDefinition *definition;
+        Rectangle rect;
+        Color fill_color;
+        Color outline_color;
+
+        if (item == NULL || mojave_game_map_item_collected(game, i)) {
+            continue;
+        }
+
+        definition = mojave_item_database_find(&game->item_database, item->item_id);
+        if (definition == NULL) {
+            continue;
+        }
+
+        rect.x = (float)(item->spawn_x * map->tile_size + 10);
+        rect.y = (float)(item->spawn_y * map->tile_size + 10);
+        rect.width = 12.0f;
+        rect.height = 12.0f;
+        rect = mojave_backend_snap_rect(rect);
+        fill_color = (Color){definition->color_r, definition->color_g, definition->color_b, 255};
+        outline_color = i == nearby_item_index ? GOLD : (Color){53, 42, 31, 255};
+
+        DrawRectangleRec(rect, fill_color);
+        mojave_backend_draw_rect_outline(rect, 2, outline_color);
+    }
+}
+
 static void mojave_backend_draw_dialogue(const MojaveGame *game) {
     const MojaveDialogueNode *node = mojave_game_dialogue_node(game);
+    const MojaveDialogueChoice *choice;
     int i;
     int selected_choice;
+    int visible_choice_count;
 
     if (node == NULL) {
         return;
     }
 
     selected_choice = mojave_game_dialogue_selected_choice(game);
+    visible_choice_count = mojave_game_dialogue_visible_choice_count(game);
     DrawRectangle(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, Fade(BLACK, 0.88f));
     DrawRectangleLines(40, GetScreenHeight() - 220, GetScreenWidth() - 80, 180, RAYWHITE);
     DrawText(node->speaker, 60, GetScreenHeight() - 200, 20, GOLD);
     DrawText(node->text, 60, GetScreenHeight() - 168, 20, RAYWHITE);
 
-    for (i = 0; i < node->choice_count; i += 1) {
+    for (i = 0; i < visible_choice_count; i += 1) {
         Color color = i == selected_choice ? GOLD : LIGHTGRAY;
-        DrawText(node->choices[i].text, 80, GetScreenHeight() - 132 + i * 22, 20, color);
+        choice = mojave_game_dialogue_visible_choice(game, i);
+        if (choice != NULL) {
+            DrawText(choice->text, 80, GetScreenHeight() - 132 + i * 22, 20, color);
+        }
     }
 
-    if (node->choice_count == 0) {
+    if (visible_choice_count == 0) {
         DrawText("Enter / Space", GetScreenWidth() - 220, GetScreenHeight() - 74, 20, LIGHTGRAY);
     }
+}
+
+static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
+    const MojaveMapItem *item;
+    const MojaveItemDefinition *definition;
+    int nearby_item_index;
+
+    if (g_show_quest_log || g_show_inventory || mojave_game_dialogue_active(game)) {
+        return;
+    }
+
+    nearby_item_index = mojave_game_nearby_item_index(game);
+    if (nearby_item_index < 0) {
+        return;
+    }
+
+    item = mojave_game_map_item(game, nearby_item_index);
+    if (item == NULL) {
+        return;
+    }
+
+    definition = mojave_item_database_find(&game->item_database, item->item_id);
+    if (definition == NULL) {
+        return;
+    }
+
+    DrawRectangle(12, GetScreenHeight() - 64, 360, 40, Fade(RAYWHITE, 0.9f));
+    DrawRectangleLines(12, GetScreenHeight() - 64, 360, 40, DARKGRAY);
+    DrawText(TextFormat("Pick up: %s", definition->name), 24, GetScreenHeight() - 52, 20, BLACK);
+    DrawText("E / Enter / Space", 212, GetScreenHeight() - 52, 20, DARKGRAY);
 }
 
 static void mojave_backend_draw_quest_log(const MojaveGame *game) {
@@ -184,6 +255,43 @@ static void mojave_backend_draw_quest_log(const MojaveGame *game) {
     }
 }
 
+static void mojave_backend_draw_inventory(const MojaveGame *game) {
+    int y;
+    int i;
+
+    if (!g_show_inventory) {
+        return;
+    }
+
+    DrawRectangle(120, 56, GetScreenWidth() - 240, GetScreenHeight() - 112, Fade((Color){24, 23, 20, 255}, 0.94f));
+    DrawRectangleLines(120, 56, GetScreenWidth() - 240, GetScreenHeight() - 112, (Color){190, 198, 181, 255});
+    DrawText("Inventory", 148, 78, 20, (Color){222, 232, 205, 255});
+    DrawText("Close: I", GetScreenWidth() - 220, 78, 20, LIGHTGRAY);
+
+    y = 120;
+    if (mojave_game_inventory_count(game) == 0) {
+        DrawText("Inventory is empty", 164, y, 20, LIGHTGRAY);
+        return;
+    }
+
+    for (i = 0; i < mojave_game_inventory_count(game); i += 1) {
+        const MojaveInventoryEntry *entry = mojave_game_inventory_entry(game, i);
+        Rectangle swatch;
+
+        if (entry == NULL || entry->definition == NULL) {
+            continue;
+        }
+
+        swatch = (Rectangle){148.0f, (float)y + 4.0f, 12.0f, 12.0f};
+        DrawRectangleRec(swatch, (Color){entry->definition->color_r, entry->definition->color_g, entry->definition->color_b, 255});
+        mojave_backend_draw_rect_outline(swatch, 2, (Color){48, 44, 37, 255});
+        DrawText(entry->definition->name, 176, y, 20, RAYWHITE);
+        DrawText(entry->definition->description, 176, y + 22, 20, LIGHTGRAY);
+        DrawText(TextFormat("x%d", entry->count), GetScreenWidth() - 220, y, 20, (Color){211, 220, 154, 255});
+        y += 58;
+    }
+}
+
 bool mojave_backend_init(const MojaveBackendConfig *config) {
     if (config == NULL) {
         return false;
@@ -201,6 +309,7 @@ bool mojave_backend_init(const MojaveBackendConfig *config) {
     };
     g_camera.target = (Vector2){0.0f, 0.0f};
     g_show_quest_log = false;
+    g_show_inventory = false;
     return true;
 }
 
@@ -217,14 +326,24 @@ float mojave_backend_frame_time(void) {
 }
 
 MojaveInput mojave_backend_poll_input(void) {
-    MojaveInput input = {0.0f, 0.0f, false, false, false, false, false, false};
+    MojaveInput input = {0.0f, 0.0f, false, false, false, false, false, false, false};
 
     input.quest_log_pressed = IsKeyPressed(KEY_J) || IsKeyPressed(KEY_TAB);
+    input.inventory_pressed = IsKeyPressed(KEY_I);
     if (input.quest_log_pressed) {
         g_show_quest_log = !g_show_quest_log;
+        if (g_show_quest_log) {
+            g_show_inventory = false;
+        }
+    }
+    if (input.inventory_pressed) {
+        g_show_inventory = !g_show_inventory;
+        if (g_show_inventory) {
+            g_show_quest_log = false;
+        }
     }
 
-    if (g_show_quest_log) {
+    if (g_show_quest_log || g_show_inventory) {
         return input;
     }
 
@@ -280,30 +399,34 @@ void mojave_backend_draw(const MojaveGame *game) {
 
     BeginMode2D(g_camera);
     mojave_backend_draw_map(map);
+    mojave_backend_draw_items(game);
     mojave_backend_draw_npcs(game);
     DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
     mojave_backend_draw_rect_outline(player_rect, 2, (Color){14, 37, 58, 255});
     mojave_backend_draw_rect_outline((Rectangle){0.0f, 0.0f, (float)map_width_px, (float)map_height_px}, 1, BLACK);
     EndMode2D();
 
-    DrawRectangle(12, 12, 420, 126, Fade(RAYWHITE, 0.85f));
-    DrawRectangleLines(12, 12, 420, 126, DARKGRAY);
+    DrawRectangle(12, 12, 420, 148, Fade(RAYWHITE, 0.85f));
+    DrawRectangleLines(12, 12, 420, 148, DARKGRAY);
     DrawText(map->name, 24, 24, 20, BLACK);
     DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
     DrawText("Talk: Enter / Space / E", 24, 74, 20, BLACK);
     DrawText("Quests: J / Tab", 24, 96, 20, BLACK);
-    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 240, 96, 20, DARKGRAY);
-    if (!g_show_quest_log && active_quest != NULL && active_quest->definition != NULL && active_quest->stage >= 0 &&
+    DrawText("Inventory: I", 24, 118, 20, BLACK);
+    DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 240, 118, 20, DARKGRAY);
+    if (!g_show_quest_log && !g_show_inventory && active_quest != NULL && active_quest->definition != NULL && active_quest->stage >= 0 &&
         active_quest->stage < active_quest->definition->stage_count) {
         quest_title_width = MeasureText(active_quest->definition->title, 20);
-        DrawRectangle(12, 146, 520, 56, Fade(RAYWHITE, 0.85f));
-        DrawRectangleLines(12, 146, 520, 56, DARKGRAY);
-        DrawText(active_quest->definition->title, 24, 160, 20, MAROON);
-        DrawText(active_quest->definition->stages[active_quest->stage], 36 + quest_title_width, 160, 20, DARKBROWN);
+        DrawRectangle(12, 168, 520, 56, Fade(RAYWHITE, 0.85f));
+        DrawRectangleLines(12, 168, 520, 56, DARKGRAY);
+        DrawText(active_quest->definition->title, 24, 182, 20, MAROON);
+        DrawText(active_quest->definition->stages[active_quest->stage], 36 + quest_title_width, 182, 20, DARKBROWN);
     }
 
     mojave_backend_draw_dialogue(game);
     mojave_backend_draw_quest_log(game);
+    mojave_backend_draw_inventory(game);
+    mojave_backend_draw_interaction_prompt(game);
 
     EndDrawing();
 }

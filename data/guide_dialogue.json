@@ -24,6 +24,23 @@
           ]
         },
         {
+          "text": "> Do you have any supplies?",
+          "next": "give_stimpak",
+          "actions": [
+            { "type": "give_item", "item": "stimpak", "count": 1 }
+          ]
+        },
+        {
+          "text": "> Take back that stimpak.",
+          "next": "take_stimpak",
+          "conditions": [
+            { "type": "has_item", "item": "stimpak", "count": 1 }
+          ],
+          "actions": [
+            { "type": "remove_item", "item": "stimpak", "count": 1 }
+          ]
+        },
+        {
           "text": "> I am done.",
           "next": "end",
           "actions": [
@@ -43,6 +60,18 @@
       "id": "data",
       "speaker": "Guide",
       "text": "Because Mojave wants authored data, not script-driven quests.",
+      "next": "intro"
+    },
+    {
+      "id": "give_stimpak",
+      "speaker": "Guide",
+      "text": "Sure. Take this stimpak for testing.",
+      "next": "intro"
+    },
+    {
+      "id": "take_stimpak",
+      "speaker": "Guide",
+      "text": "Fair enough. I will take it back.",
       "next": "intro"
     },
     {

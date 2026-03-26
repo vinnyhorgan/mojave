@@ -1,0 +1,18 @@
+{
+  "items": [
+    {
+      "id": "stimpak",
+      "name": "Stimpak",
+      "description": "A compact medical injector.",
+      "stackable": true,
+      "color": { "r": 186, "g": 62, "b": 62 }
+    },
+    {
+      "id": "vault_canteen",
+      "name": "Vault Canteen",
+      "description": "A sturdy prototype water flask.",
+      "stackable": false,
+      "color": { "r": 76, "g": 128, "b": 177 }
+    }
+  ]
+}

@@ -18,9 +18,29 @@ static void mojave_map_reset(MojaveMap *map) {
         free(map->npcs[i].name);
         free(map->npcs[i].dialogue_path);
     }
+    for (i = 0; i < map->item_count; i += 1) {
+        free(map->items[i].item_id);
+    }
+    free(map->items);
     free(map->npcs);
     free(map->tiles);
     memset(map, 0, sizeof(*map));
+}
+
+static void mojave_item_database_reset(MojaveItemDatabase *item_database) {
+    int i;
+
+    if (item_database == NULL) {
+        return;
+    }
+
+    for (i = 0; i < item_database->item_count; i += 1) {
+        free(item_database->items[i].id);
+        free(item_database->items[i].name);
+        free(item_database->items[i].description);
+    }
+    free(item_database->items);
+    memset(item_database, 0, sizeof(*item_database));
 }
 
 static void mojave_dialogue_node_reset(MojaveDialogueNode *node) {
@@ -34,19 +54,30 @@ static void mojave_dialogue_node_reset(MojaveDialogueNode *node) {
     free(node->speaker);
     free(node->text);
     free(node->next_id);
+    for (i = 0; i < node->condition_count; i += 1) {
+        free(node->conditions[i].item_id);
+    }
+    free(node->conditions);
     for (i = 0; i < node->action_count; i += 1) {
         free(node->actions[i].flag_id);
         free(node->actions[i].quest_id);
+        free(node->actions[i].item_id);
     }
     free(node->actions);
     for (i = 0; i < node->choice_count; i += 1) {
+        int condition_index;
         int action_index;
 
         free(node->choices[i].text);
         free(node->choices[i].next_id);
+        for (condition_index = 0; condition_index < node->choices[i].condition_count; condition_index += 1) {
+            free(node->choices[i].conditions[condition_index].item_id);
+        }
+        free(node->choices[i].conditions);
         for (action_index = 0; action_index < node->choices[i].action_count; action_index += 1) {
             free(node->choices[i].actions[action_index].flag_id);
             free(node->choices[i].actions[action_index].quest_id);
+            free(node->choices[i].actions[action_index].item_id);
         }
         free(node->choices[i].actions);
     }
@@ -146,7 +177,78 @@ static MojaveEventActionType mojave_event_action_type_from_string(const char *ty
     if (strcmp(type_name, "complete_quest") == 0) {
         return MOJAVE_EVENT_ACTION_COMPLETE_QUEST;
     }
+    if (strcmp(type_name, "give_item") == 0) {
+        return MOJAVE_EVENT_ACTION_GIVE_ITEM;
+    }
+    if (strcmp(type_name, "remove_item") == 0) {
+        return MOJAVE_EVENT_ACTION_REMOVE_ITEM;
+    }
     return MOJAVE_EVENT_ACTION_NONE;
+}
+
+static MojaveConditionType mojave_condition_type_from_string(const char *type_name) {
+    if (type_name == NULL) {
+        return MOJAVE_CONDITION_NONE;
+    }
+    if (strcmp(type_name, "has_item") == 0) {
+        return MOJAVE_CONDITION_HAS_ITEM;
+    }
+    return MOJAVE_CONDITION_NONE;
+}
+
+static bool mojave_conditions_load(yyjson_val *conditions_value, MojaveCondition **conditions, int *condition_count) {
+    yyjson_arr_iter condition_iter;
+    yyjson_val *condition_value;
+    int index;
+
+    *conditions = NULL;
+    *condition_count = 0;
+
+    if (conditions_value == NULL) {
+        return true;
+    }
+    if (!yyjson_is_arr(conditions_value)) {
+        return false;
+    }
+
+    *condition_count = (int)yyjson_arr_size(conditions_value);
+    *conditions = calloc((size_t)*condition_count, sizeof(**conditions));
+    if (*conditions == NULL && *condition_count > 0) {
+        return false;
+    }
+
+    index = 0;
+    yyjson_arr_iter_init(conditions_value, &condition_iter);
+    while ((condition_value = yyjson_arr_iter_next(&condition_iter)) != NULL) {
+        MojaveCondition *condition = &(*conditions)[index];
+        yyjson_val *type = yyjson_obj_get(condition_value, "type");
+        yyjson_val *item = yyjson_obj_get(condition_value, "item");
+        yyjson_val *count = yyjson_obj_get(condition_value, "count");
+
+        if (!yyjson_is_obj(condition_value) || !yyjson_is_str(type)) {
+            return false;
+        }
+
+        condition->type = mojave_condition_type_from_string(yyjson_get_str(type));
+        if (condition->type == MOJAVE_CONDITION_NONE) {
+            return false;
+        }
+
+        if (condition->type == MOJAVE_CONDITION_HAS_ITEM) {
+            if (!yyjson_is_str(item)) {
+                return false;
+            }
+            condition->item_id = mojave_strdup(yyjson_get_str(item));
+            condition->item_count = yyjson_is_int(count) ? (int)yyjson_get_int(count) : 1;
+            if (condition->item_id == NULL || condition->item_count <= 0) {
+                return false;
+            }
+        }
+
+        index += 1;
+    }
+
+    return true;
 }
 
 static bool mojave_event_actions_load(yyjson_val *actions_value, MojaveEventAction **actions, int *action_count) {
@@ -179,6 +281,8 @@ static bool mojave_event_actions_load(yyjson_val *actions_value, MojaveEventActi
         yyjson_val *value = yyjson_obj_get(action_value, "value");
         yyjson_val *quest = yyjson_obj_get(action_value, "quest");
         yyjson_val *stage = yyjson_obj_get(action_value, "stage");
+        yyjson_val *item = yyjson_obj_get(action_value, "item");
+        yyjson_val *count = yyjson_obj_get(action_value, "count");
 
         if (!yyjson_is_obj(action_value) || !yyjson_is_str(type)) {
             return false;
@@ -196,6 +300,15 @@ static bool mojave_event_actions_load(yyjson_val *actions_value, MojaveEventActi
             action->flag_id = mojave_strdup(yyjson_get_str(flag));
             action->flag_value = yyjson_get_bool(value);
             if (action->flag_id == NULL) {
+                return false;
+            }
+        } else if (action->type == MOJAVE_EVENT_ACTION_GIVE_ITEM || action->type == MOJAVE_EVENT_ACTION_REMOVE_ITEM) {
+            if (!yyjson_is_str(item)) {
+                return false;
+            }
+            action->item_id = mojave_strdup(yyjson_get_str(item));
+            action->item_count = yyjson_is_int(count) ? (int)yyjson_get_int(count) : 1;
+            if (action->item_id == NULL || action->item_count <= 0) {
                 return false;
             }
         } else {
@@ -249,6 +362,7 @@ static bool mojave_file_exists(const char *path) {
 bool mojave_map_load(const char *path, MojaveMap *map) {
     yyjson_doc *doc;
     yyjson_val *root;
+    yyjson_val *items;
     yyjson_val *npcs;
     yyjson_val *tiles;
     yyjson_val *spawn;
@@ -263,6 +377,7 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     size_t index;
     size_t expected_count;
     int npc_index;
+    int item_index;
 
     if (path == NULL || map == NULL) {
         return false;
@@ -282,6 +397,7 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
     }
 
     tiles = yyjson_obj_get(root, "tiles");
+    items = yyjson_obj_get(root, "items");
     npcs = yyjson_obj_get(root, "npcs");
     spawn = yyjson_obj_get(root, "player_spawn");
     name = yyjson_obj_get(root, "name");
@@ -453,12 +569,149 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
         }
     }
 
+    if (items != NULL) {
+        yyjson_arr_iter item_iter;
+        yyjson_val *item_value;
+
+        if (!yyjson_is_arr(items)) {
+            fprintf(stderr, "Map file '%s' has an invalid item list\n", path);
+            yyjson_doc_free(doc);
+            mojave_map_reset(map);
+            return false;
+        }
+
+        map->item_count = (int)yyjson_arr_size(items);
+        map->items = calloc((size_t)map->item_count, sizeof(*map->items));
+        if (map->items == NULL && map->item_count > 0) {
+            yyjson_doc_free(doc);
+            mojave_map_reset(map);
+            return false;
+        }
+
+        item_index = 0;
+        yyjson_arr_iter_init(items, &item_iter);
+        while ((item_value = yyjson_arr_iter_next(&item_iter)) != NULL) {
+            MojaveMapItem *item = &map->items[item_index];
+            yyjson_val *item_id = yyjson_obj_get(item_value, "id");
+            yyjson_val *spawn = yyjson_obj_get(item_value, "spawn");
+            yyjson_val *spawn_x = yyjson_obj_get(spawn, "x");
+            yyjson_val *spawn_y = yyjson_obj_get(spawn, "y");
+
+            if (!yyjson_is_obj(item_value) || !yyjson_is_str(item_id) || !yyjson_is_obj(spawn) ||
+                !yyjson_is_int(spawn_x) || !yyjson_is_int(spawn_y)) {
+                fprintf(stderr, "Map file '%s' has an invalid item\n", path);
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
+            item->item_id = mojave_strdup(yyjson_get_str(item_id));
+            item->spawn_x = (int)yyjson_get_int(spawn_x);
+            item->spawn_y = (int)yyjson_get_int(spawn_y);
+            if (item->item_id == NULL) {
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
+            item_index += 1;
+        }
+    }
+
     yyjson_doc_free(doc);
     return true;
 }
 
 void mojave_map_unload(MojaveMap *map) {
     mojave_map_reset(map);
+}
+
+bool mojave_item_database_load(const char *path, MojaveItemDatabase *item_database) {
+    yyjson_doc *doc;
+    yyjson_val *root;
+    yyjson_val *items;
+    yyjson_arr_iter item_iter;
+    yyjson_val *item_value;
+    int item_index;
+
+    if (path == NULL || item_database == NULL) {
+        return false;
+    }
+
+    mojave_item_database_reset(item_database);
+    if (!mojave_json_read_file(path, &doc)) {
+        return false;
+    }
+
+    root = yyjson_doc_get_root(doc);
+    items = yyjson_obj_get(root, "items");
+    if (!yyjson_is_obj(root) || !yyjson_is_arr(items)) {
+        fprintf(stderr, "Item file '%s' is missing required fields\n", path);
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    item_database->item_count = (int)yyjson_arr_size(items);
+    item_database->items = calloc((size_t)item_database->item_count, sizeof(*item_database->items));
+    if (item_database->items == NULL && item_database->item_count > 0) {
+        yyjson_doc_free(doc);
+        return false;
+    }
+
+    item_index = 0;
+    yyjson_arr_iter_init(items, &item_iter);
+    while ((item_value = yyjson_arr_iter_next(&item_iter)) != NULL) {
+        MojaveItemDefinition *item = &item_database->items[item_index];
+        yyjson_val *id = yyjson_obj_get(item_value, "id");
+        yyjson_val *name = yyjson_obj_get(item_value, "name");
+        yyjson_val *description = yyjson_obj_get(item_value, "description");
+        yyjson_val *stackable = yyjson_obj_get(item_value, "stackable");
+        yyjson_val *color = yyjson_obj_get(item_value, "color");
+
+        if (!yyjson_is_obj(item_value) || !yyjson_is_str(id) || !yyjson_is_str(name) ||
+            !yyjson_is_str(description) || !yyjson_is_bool(stackable) ||
+            !mojave_json_read_rgb(color, &item->color_r, &item->color_g, &item->color_b)) {
+            fprintf(stderr, "Item file '%s' contains an invalid item\n", path);
+            mojave_item_database_reset(item_database);
+            yyjson_doc_free(doc);
+            return false;
+        }
+
+        item->id = mojave_strdup(yyjson_get_str(id));
+        item->name = mojave_strdup(yyjson_get_str(name));
+        item->description = mojave_strdup(yyjson_get_str(description));
+        item->stackable = yyjson_get_bool(stackable);
+        if (item->id == NULL || item->name == NULL || item->description == NULL) {
+            mojave_item_database_reset(item_database);
+            yyjson_doc_free(doc);
+            return false;
+        }
+
+        item_index += 1;
+    }
+
+    yyjson_doc_free(doc);
+    return true;
+}
+
+void mojave_item_database_unload(MojaveItemDatabase *item_database) {
+    mojave_item_database_reset(item_database);
+}
+
+const MojaveItemDefinition *mojave_item_database_find(const MojaveItemDatabase *item_database, const char *id) {
+    int i;
+
+    if (item_database == NULL || id == NULL) {
+        return NULL;
+    }
+
+    for (i = 0; i < item_database->item_count; i += 1) {
+        if (item_database->items[i].id != NULL && strcmp(item_database->items[i].id, id) == 0) {
+            return &item_database->items[i];
+        }
+    }
+
+    return NULL;
 }
 
 bool mojave_quest_log_load(const char *path, MojaveQuestLog *quest_log) {
@@ -621,6 +874,7 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
         yyjson_val *text = yyjson_obj_get(node_value, "text");
         yyjson_val *next = yyjson_obj_get(node_value, "next");
         yyjson_val *is_end = yyjson_obj_get(node_value, "end");
+        yyjson_val *conditions = yyjson_obj_get(node_value, "conditions");
         yyjson_val *actions = yyjson_obj_get(node_value, "actions");
         yyjson_val *choices = yyjson_obj_get(node_value, "choices");
 
@@ -638,6 +892,7 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
         node->is_end = yyjson_is_bool(is_end) ? yyjson_get_bool(is_end) : false;
 
         if (node->id == NULL || node->speaker == NULL || node->text == NULL ||
+            !mojave_conditions_load(conditions, &node->conditions, &node->condition_count) ||
             !mojave_event_actions_load(actions, &node->actions, &node->action_count)) {
             mojave_dialogue_reset(dialogue);
             yyjson_doc_free(doc);
@@ -669,6 +924,7 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
             while ((choice_value = yyjson_arr_iter_next(&choice_iter)) != NULL) {
                 yyjson_val *choice_text = yyjson_obj_get(choice_value, "text");
                 yyjson_val *choice_next = yyjson_obj_get(choice_value, "next");
+                yyjson_val *choice_conditions = yyjson_obj_get(choice_value, "conditions");
                 yyjson_val *choice_actions = yyjson_obj_get(choice_value, "actions");
 
                 if (!yyjson_is_obj(choice_value) || !yyjson_is_str(choice_text) || !yyjson_is_str(choice_next)) {
@@ -681,6 +937,10 @@ bool mojave_dialogue_load(const char *path, MojaveDialogue *dialogue) {
                 node->choices[choice_index].text = mojave_strdup(yyjson_get_str(choice_text));
                 node->choices[choice_index].next_id = mojave_strdup(yyjson_get_str(choice_next));
                 if (node->choices[choice_index].text == NULL || node->choices[choice_index].next_id == NULL ||
+                    !mojave_conditions_load(
+                        choice_conditions,
+                        &node->choices[choice_index].conditions,
+                        &node->choices[choice_index].condition_count) ||
                     !mojave_event_actions_load(
                         choice_actions,
                         &node->choices[choice_index].actions,
