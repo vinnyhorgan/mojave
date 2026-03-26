@@ -1,10 +1,11 @@
 #include "backend.h"
 
+#include <math.h>
+
 #include <raylib.h>
 
 static Camera2D g_camera;
-
-static const float MOJAVE_NPC_DRAW_SIZE = 18.0f;
+static const float MOJAVE_CAMERA_ZOOM = 2.0f;
 
 static Color mojave_floor_color(void) {
     return (Color){60, 92, 65, 255};
@@ -14,14 +15,37 @@ static Color mojave_wall_color(void) {
     return (Color){87, 73, 54, 255};
 }
 
+static float mojave_backend_snap(float value) {
+    return roundf(value);
+}
+
+static Rectangle mojave_backend_snap_rect(Rectangle rect) {
+    rect.x = mojave_backend_snap(rect.x);
+    rect.y = mojave_backend_snap(rect.y);
+    rect.width = mojave_backend_snap(rect.width);
+    rect.height = mojave_backend_snap(rect.height);
+    return rect;
+}
+
+static void mojave_backend_draw_rect_outline(Rectangle rect, int thickness, Color color) {
+    rect = mojave_backend_snap_rect(rect);
+    DrawRectangle((int)rect.x, (int)rect.y, (int)rect.width, thickness, color);
+    DrawRectangle((int)rect.x, (int)(rect.y + rect.height - thickness), (int)rect.width, thickness, color);
+    DrawRectangle((int)rect.x, (int)rect.y, thickness, (int)rect.height, color);
+    DrawRectangle((int)(rect.x + rect.width - thickness), (int)rect.y, thickness, (int)rect.height, color);
+}
+
 static void mojave_backend_update_camera(const MojaveGame *game) {
     MojaveVec2 player_position = mojave_game_player_position(game);
     float player_size = mojave_game_player_size();
 
-    g_camera.offset = (Vector2){(float)GetScreenWidth() * 0.5f, (float)GetScreenHeight() * 0.5f};
+    g_camera.offset = (Vector2){
+        mojave_backend_snap((float)GetScreenWidth() * 0.5f),
+        mojave_backend_snap((float)GetScreenHeight() * 0.5f)
+    };
     g_camera.target = (Vector2){
-        player_position.x + player_size * 0.5f,
-        player_position.y + player_size * 0.5f
+        mojave_backend_snap(player_position.x + player_size * 0.5f),
+        mojave_backend_snap(player_position.y + player_size * 0.5f)
     };
 }
 
@@ -38,9 +62,10 @@ static void mojave_backend_draw_map(const MojaveMap *map) {
                 (float)map->tile_size,
                 (float)map->tile_size,
             };
+            rect = mojave_backend_snap_rect(rect);
 
             DrawRectangleRec(rect, tile == 0 ? mojave_floor_color() : mojave_wall_color());
-            DrawRectangleLinesEx(rect, 1.0f, (Color){0, 0, 0, 35});
+            mojave_backend_draw_rect_outline(rect, 1, (Color){0, 0, 0, 35});
         }
     }
 }
@@ -53,7 +78,8 @@ static void mojave_backend_draw_npcs(const MojaveGame *game) {
     for (i = 0; i < mojave_game_npc_count(game); i += 1) {
         const MojaveNpc *npc = mojave_game_npc(game, i);
         Rectangle rect;
-        Color fill;
+        Color fill_color;
+        Color outline_color;
 
         if (npc == NULL) {
             continue;
@@ -61,13 +87,15 @@ static void mojave_backend_draw_npcs(const MojaveGame *game) {
 
         rect.x = (float)(npc->spawn_x * map->tile_size + 7);
         rect.y = (float)(npc->spawn_y * map->tile_size + 7);
-        rect.width = MOJAVE_NPC_DRAW_SIZE;
-        rect.height = MOJAVE_NPC_DRAW_SIZE;
-        fill = i == nearby_npc_index ? (Color){205, 160, 76, 255} : (Color){161, 92, 70, 255};
+        rect.width = 18.0f;
+        rect.height = 18.0f;
+        rect = mojave_backend_snap_rect(rect);
+        fill_color = (Color){npc->outfit_r, npc->outfit_g, npc->outfit_b, 255};
+        outline_color = i == nearby_npc_index ? (Color){236, 204, 110, 255} : (Color){45, 31, 26, 255};
 
-        DrawRectangleRec(rect, fill);
-        DrawRectangleLinesEx(rect, 2.0f, (Color){56, 28, 21, 255});
-        DrawText(npc->name, (int)rect.x - 6, (int)rect.y - 18, 10, BLACK);
+        DrawRectangleRec(rect, fill_color);
+        mojave_backend_draw_rect_outline(rect, 2, outline_color);
+        DrawText(npc->name, (int)rect.x - 6, (int)rect.y - 18, 10, outline_color);
     }
 }
 
@@ -105,9 +133,12 @@ bool mojave_backend_init(const MojaveBackendConfig *config) {
     InitWindow(config->window_width, config->window_height, config->window_title);
     SetTargetFPS(60);
 
-    g_camera.zoom = 1.0f;
+    g_camera.zoom = MOJAVE_CAMERA_ZOOM;
     g_camera.rotation = 0.0f;
-    g_camera.offset = (Vector2){(float)config->window_width * 0.5f, (float)config->window_height * 0.5f};
+    g_camera.offset = (Vector2){
+        mojave_backend_snap((float)config->window_width * 0.5f),
+        mojave_backend_snap((float)config->window_height * 0.5f)
+    };
     g_camera.target = (Vector2){0.0f, 0.0f};
     return true;
 }
@@ -169,6 +200,7 @@ void mojave_backend_draw(const MojaveGame *game) {
     map_width_px = map->width * map->tile_size;
     map_height_px = map->height * map->tile_size;
     player_rect = (Rectangle){player_position.x, player_position.y, player_size, player_size};
+    player_rect = mojave_backend_snap_rect(player_rect);
 
     BeginDrawing();
     ClearBackground((Color){205, 197, 176, 255});
@@ -177,8 +209,8 @@ void mojave_backend_draw(const MojaveGame *game) {
     mojave_backend_draw_map(map);
     mojave_backend_draw_npcs(game);
     DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
-    DrawRectangleLinesEx(player_rect, 2.0f, (Color){14, 37, 58, 255});
-    DrawRectangleLines(0, 0, map_width_px, map_height_px, BLACK);
+    mojave_backend_draw_rect_outline(player_rect, 2, (Color){14, 37, 58, 255});
+    mojave_backend_draw_rect_outline((Rectangle){0.0f, 0.0f, (float)map_width_px, (float)map_height_px}, 1, BLACK);
     EndMode2D();
 
     DrawRectangle(12, 12, 300, 112, Fade(RAYWHITE, 0.85f));

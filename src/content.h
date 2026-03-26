@@ -32,6 +32,22 @@ typedef struct MojaveNpc {
     char *dialogue_path;
     int spawn_x;
     int spawn_y;
+    int sprite_width;
+    int sprite_height;
+    int origin_x;
+    int origin_y;
+    unsigned char body_r;
+    unsigned char body_g;
+    unsigned char body_b;
+    unsigned char outfit_r;
+    unsigned char outfit_g;
+    unsigned char outfit_b;
+    unsigned char accent_r;
+    unsigned char accent_g;
+    unsigned char accent_b;
+    unsigned char skin_r;
+    unsigned char skin_g;
+    unsigned char skin_b;
 } MojaveNpc;
 
 typedef struct MojaveMap {

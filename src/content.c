@@ -75,6 +75,28 @@ static char *mojave_strdup(const char *value) {
     return copy;
 }
 
+static bool mojave_json_read_rgb(yyjson_val *value, unsigned char *out_r, unsigned char *out_g, unsigned char *out_b) {
+    yyjson_val *r;
+    yyjson_val *g;
+    yyjson_val *b;
+
+    if (!yyjson_is_obj(value)) {
+        return false;
+    }
+
+    r = yyjson_obj_get(value, "r");
+    g = yyjson_obj_get(value, "g");
+    b = yyjson_obj_get(value, "b");
+    if (!yyjson_is_int(r) || !yyjson_is_int(g) || !yyjson_is_int(b)) {
+        return false;
+    }
+
+    *out_r = (unsigned char)yyjson_get_int(r);
+    *out_g = (unsigned char)yyjson_get_int(g);
+    *out_b = (unsigned char)yyjson_get_int(b);
+    return true;
+}
+
 static bool mojave_json_read_file(const char *path, yyjson_doc **doc) {
     yyjson_read_err err;
 
@@ -236,11 +258,22 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
             yyjson_val *npc_name = yyjson_obj_get(npc_value, "name");
             yyjson_val *npc_dialogue = yyjson_obj_get(npc_value, "dialogue");
             yyjson_val *npc_spawn = yyjson_obj_get(npc_value, "spawn");
+            yyjson_val *npc_sprite = yyjson_obj_get(npc_value, "sprite");
+            yyjson_val *npc_palette = yyjson_obj_get(npc_value, "palette");
             yyjson_val *npc_spawn_x;
             yyjson_val *npc_spawn_y;
+            yyjson_val *sprite_width;
+            yyjson_val *sprite_height;
+            yyjson_val *sprite_origin_x;
+            yyjson_val *sprite_origin_y;
+            yyjson_val *palette_body;
+            yyjson_val *palette_outfit;
+            yyjson_val *palette_accent;
+            yyjson_val *palette_skin;
 
             if (!yyjson_is_obj(npc_value) || !yyjson_is_str(npc_id) || !yyjson_is_str(npc_name) ||
-                !yyjson_is_str(npc_dialogue) || !yyjson_is_obj(npc_spawn)) {
+                !yyjson_is_str(npc_dialogue) || !yyjson_is_obj(npc_spawn) ||
+                !yyjson_is_obj(npc_sprite) || !yyjson_is_obj(npc_palette)) {
                 fprintf(stderr, "Map file '%s' has an invalid npc\n", path);
                 yyjson_doc_free(doc);
                 mojave_map_reset(map);
@@ -256,11 +289,36 @@ bool mojave_map_load(const char *path, MojaveMap *map) {
                 return false;
             }
 
+            sprite_width = yyjson_obj_get(npc_sprite, "width");
+            sprite_height = yyjson_obj_get(npc_sprite, "height");
+            sprite_origin_x = yyjson_obj_get(npc_sprite, "origin_x");
+            sprite_origin_y = yyjson_obj_get(npc_sprite, "origin_y");
+            palette_body = yyjson_obj_get(npc_palette, "body");
+            palette_outfit = yyjson_obj_get(npc_palette, "outfit");
+            palette_accent = yyjson_obj_get(npc_palette, "accent");
+            palette_skin = yyjson_obj_get(npc_palette, "skin");
+
+            if (!yyjson_is_int(sprite_width) || !yyjson_is_int(sprite_height) ||
+                !yyjson_is_int(sprite_origin_x) || !yyjson_is_int(sprite_origin_y) ||
+                !mojave_json_read_rgb(palette_body, &npc->body_r, &npc->body_g, &npc->body_b) ||
+                !mojave_json_read_rgb(palette_outfit, &npc->outfit_r, &npc->outfit_g, &npc->outfit_b) ||
+                !mojave_json_read_rgb(palette_accent, &npc->accent_r, &npc->accent_g, &npc->accent_b) ||
+                !mojave_json_read_rgb(palette_skin, &npc->skin_r, &npc->skin_g, &npc->skin_b)) {
+                fprintf(stderr, "Map file '%s' has invalid npc visual data\n", path);
+                yyjson_doc_free(doc);
+                mojave_map_reset(map);
+                return false;
+            }
+
             npc->id = mojave_strdup(yyjson_get_str(npc_id));
             npc->name = mojave_strdup(yyjson_get_str(npc_name));
             npc->dialogue_path = mojave_strdup(yyjson_get_str(npc_dialogue));
             npc->spawn_x = (int)yyjson_get_int(npc_spawn_x);
             npc->spawn_y = (int)yyjson_get_int(npc_spawn_y);
+            npc->sprite_width = (int)yyjson_get_int(sprite_width);
+            npc->sprite_height = (int)yyjson_get_int(sprite_height);
+            npc->origin_x = (int)yyjson_get_int(sprite_origin_x);
+            npc->origin_y = (int)yyjson_get_int(sprite_origin_y);
 
             if (npc->id == NULL || npc->name == NULL || npc->dialogue_path == NULL) {
                 yyjson_doc_free(doc);
