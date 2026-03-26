@@ -7,6 +7,7 @@ BUILD_DIR := build
 SOURCES := \
 	src/main.c \
 	src/backend_raylib.c \
+	src/collision.c \
 	src/runtime.c \
 	src/content.c \
 	flecs/distr/flecs.c

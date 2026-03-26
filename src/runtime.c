@@ -1,5 +1,7 @@
 #include "runtime.h"
 
+#include "collision.h"
+
 #include <math.h>
 #include <string.h>
 
@@ -8,37 +10,6 @@ static const float MOJAVE_PLAYER_SPEED = 180.0f;
 
 ECS_COMPONENT_DECLARE(Position) = 0;
 ECS_COMPONENT_DECLARE(Velocity) = 0;
-
-static int mojave_map_tile_at(const MojaveMap *map, int x, int y) {
-    if (x < 0 || y < 0 || x >= map->width || y >= map->height) {
-        return 1;
-    }
-
-    return map->tiles[y * map->width + x];
-}
-
-static bool mojave_map_is_solid(const MojaveMap *map, int x, int y) {
-    return mojave_map_tile_at(map, x, y) != 0;
-}
-
-static bool mojave_rect_hits_solid(const MojaveMap *map, float x, float y, float width, float height) {
-    int min_x = (int)floorf(x / (float)map->tile_size);
-    int max_x = (int)floorf((x + width - 1.0f) / (float)map->tile_size);
-    int min_y = (int)floorf(y / (float)map->tile_size);
-    int max_y = (int)floorf((y + height - 1.0f) / (float)map->tile_size);
-    int tile_x;
-    int tile_y;
-
-    for (tile_y = min_y; tile_y <= max_y; tile_y += 1) {
-        for (tile_x = min_x; tile_x <= max_x; tile_x += 1) {
-            if (mojave_map_is_solid(map, tile_x, tile_y)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
 
 static Velocity mojave_velocity_from_input(const MojaveInput *input) {
     Velocity velocity = {0.0f, 0.0f};
@@ -62,23 +33,26 @@ static Velocity mojave_velocity_from_input(const MojaveInput *input) {
 }
 
 static void mojave_move_player(const MojaveMap *map, Position *position, Velocity velocity, float dt) {
-    float next_x;
-    float next_y;
+    MojaveRect player_rect;
+    MojaveCollisionMoveResult move_result;
 
     if (position == NULL) {
         return;
     }
 
-    /* The player uses a single rectangle for now so collision stays obvious. */
-    next_x = position->x + velocity.x * dt;
-    next_y = position->y + velocity.y * dt;
+    player_rect.x = position->x;
+    player_rect.y = position->y;
+    player_rect.w = MOJAVE_PLAYER_SIZE;
+    player_rect.h = MOJAVE_PLAYER_SIZE;
 
-    if (!mojave_rect_hits_solid(map, next_x, position->y, MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE)) {
-        position->x = next_x;
-    }
-
-    if (!mojave_rect_hits_solid(map, position->x, next_y, MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE)) {
-        position->y = next_y;
+    if (mojave_collision_move_rect(
+            map,
+            &player_rect,
+            position->x + velocity.x * dt,
+            position->y + velocity.y * dt,
+            &move_result)) {
+        position->x = move_result.x;
+        position->y = move_result.y;
     }
 }
 
