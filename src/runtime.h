@@ -95,6 +95,7 @@ typedef struct MojaveInventoryEntry {
 typedef struct MojaveGame {
     ecs_world_t *world;
     ecs_entity_t player;
+    ecs_query_t *movement_query;
     MojaveMap map;
     MojaveDialogue dialogue;
     MojaveItemDatabase item_database;

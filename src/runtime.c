@@ -44,7 +44,6 @@ static Velocity mojave_velocity_from_input(const MojaveInput *input) {
     if (velocity.x != 0.0f || velocity.y != 0.0f) {
         float length = sqrtf(velocity.x * velocity.x + velocity.y * velocity.y);
 
-        /* Normalize diagonal movement so every direction moves at the same speed. */
         velocity.x = (velocity.x / length) * MOJAVE_PLAYER_SPEED;
         velocity.y = (velocity.y / length) * MOJAVE_PLAYER_SPEED;
     }
@@ -863,6 +862,13 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     ECS_COMPONENT_DEFINE(game->world, DialoguRef);
     ECS_COMPONENT_DEFINE(game->world, ActiveDialogue);
 
+    game->movement_query = ecs_query(game->world, {
+        .terms = {
+            { .id = ecs_id(Position) },
+            { .id = ecs_id(Velocity) },
+        }
+    });
+
     game->player = ecs_new(game->world);
     ecs_set(game->world, game->player, Position,
         { (float)(game->map.player_spawn_x * game->map.tile_size + 7),
@@ -1097,7 +1103,7 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     velocity = mojave_velocity_from_input(input);
     ecs_set(game->world, game->player, Velocity, {velocity.x, velocity.y});
 
-    /* Update flow stays explicit: read input, move, then handle save or load. */
+    /* Manual movement with collision for player */
     mojave_move_player(&game->map, position, velocity, dt);
 
     if (input != NULL && input->save_pressed) {
