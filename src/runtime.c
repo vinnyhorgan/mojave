@@ -31,6 +31,16 @@ ECS_COMPONENT_DECLARE(ActiveDialogue) = 0;
 static bool mojave_game_add_inventory_item(MojaveGame *game, const MojaveItemDefinition *definition);
 static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item_id, int count);
 
+static void MovementSystem(ecs_iter_t *it) {
+    Position *p = ecs_field(it, Position, 1);
+    Velocity *v = ecs_field(it, Velocity, 2);
+
+    for (int i = 0; i < it->count; i += 1) {
+        p[i].x += v[i].x * it->delta_time;
+        p[i].y += v[i].y * it->delta_time;
+    }
+}
+
 static Velocity mojave_velocity_from_input(const MojaveInput *input) {
     Velocity velocity = {0.0f, 0.0f};
 
@@ -862,12 +872,7 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     ECS_COMPONENT_DEFINE(game->world, DialoguRef);
     ECS_COMPONENT_DEFINE(game->world, ActiveDialogue);
 
-    game->movement_query = ecs_query(game->world, {
-        .terms = {
-            { .id = ecs_id(Position) },
-            { .id = ecs_id(Velocity) },
-        }
-    });
+    ECS_SYSTEM(game->world, MovementSystem, EcsOnUpdate, Position, Velocity);
 
     game->player = ecs_new(game->world);
     ecs_set(game->world, game->player, Position,
@@ -1103,7 +1108,10 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     velocity = mojave_velocity_from_input(input);
     ecs_set(game->world, game->player, Velocity, {velocity.x, velocity.y});
 
-    /* Manual movement with collision for player */
+    /* Run ECS systems (MovementSystem for entities with Position + Velocity) */
+    ecs_progress(game->world, dt);
+
+    /* Manual movement with collision for player (overrides ECS movement) */
     mojave_move_player(&game->map, position, velocity, dt);
 
     if (input != NULL && input->save_pressed) {
