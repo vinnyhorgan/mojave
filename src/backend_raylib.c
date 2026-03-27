@@ -10,8 +10,6 @@ static Camera2D g_camera;
 static const float MOJAVE_CAMERA_ZOOM = 2.0f;
 static const int MOJAVE_DIALOG_BOX_OFFSET_Y = 220;
 static const int MOJAVE_DIALOG_BOX_HEIGHT = 180;
-static bool g_show_quest_log;
-static bool g_show_inventory;
 
 static Color mojave_floor_color(void) {
     return (Color){60, 92, 65, 255};
@@ -247,7 +245,7 @@ static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
     int prompt_width;
     int nearby_item_index;
 
-    if (g_show_quest_log || g_show_inventory || mojave_game_dialogue_active(game)) {
+    if (mojave_game_ui_blocking(game)) {
         return;
     }
 
@@ -282,7 +280,7 @@ static void mojave_backend_draw_quest_log(const MojaveGame *game) {
     int y;
     int i;
 
-    if (!g_show_quest_log) {
+    if (!mojave_game_show_quest_log(game)) {
         return;
     }
 
@@ -341,7 +339,7 @@ static void mojave_backend_draw_inventory(const MojaveGame *game) {
     int y;
     int i;
 
-    if (!g_show_inventory) {
+    if (!mojave_game_show_inventory(game)) {
         return;
     }
 
@@ -391,8 +389,6 @@ bool mojave_backend_init(const MojaveBackendConfig *config) {
         mojave_backend_snap((float)config->window_height * 0.5f)
     };
     g_camera.target = (Vector2){0.0f, 0.0f};
-    g_show_quest_log = false;
-    g_show_inventory = false;
     return true;
 }
 
@@ -413,22 +409,6 @@ MojaveInput mojave_backend_poll_input(void) {
 
     input.quest_log_pressed = IsKeyPressed(KEY_J) || IsKeyPressed(KEY_TAB);
     input.inventory_pressed = IsKeyPressed(KEY_I);
-    if (input.quest_log_pressed) {
-        g_show_quest_log = !g_show_quest_log;
-        if (g_show_quest_log) {
-            g_show_inventory = false;
-        }
-    }
-    if (input.inventory_pressed) {
-        g_show_inventory = !g_show_inventory;
-        if (g_show_inventory) {
-            g_show_quest_log = false;
-        }
-    }
-
-    if (g_show_quest_log || g_show_inventory) {
-        return input;
-    }
 
     if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) {
         input.move_x -= 1.0f;
@@ -496,7 +476,10 @@ void mojave_backend_draw(const MojaveGame *game) {
     mojave_backend_draw_map(game);
     mojave_backend_draw_items(game);
     mojave_backend_draw_npcs(game);
-    DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
+    DrawRectangleRec(player_rect,
+        mojave_game_get_entity_render_data(game, player, &player_render)
+            ? (Color){player_render.r, player_render.g, player_render.b, player_render.a}
+            : (Color){42, 122, 184, 255});
     mojave_backend_draw_rect_outline(player_rect, 2, (Color){14, 37, 58, 255});
     mojave_backend_draw_rect_outline((Rectangle){0.0f, 0.0f, (float)map_width_px, (float)map_height_px}, 1, BLACK);
     EndMode2D();
@@ -509,7 +492,7 @@ void mojave_backend_draw(const MojaveGame *game) {
     DrawText("Quests: J / Tab", 24, 96, 20, BLACK);
     DrawText("Inventory: I", 24, 118, 20, BLACK);
     DrawText(mojave_game_save_loaded(game) ? "Save file found" : "No save loaded yet", 240, 118, 20, DARKGRAY);
-    if (!g_show_quest_log && !g_show_inventory && active_quest != NULL && active_quest->definition != NULL && active_quest->stage >= 0 &&
+    if (!mojave_game_show_quest_log(game) && !mojave_game_show_inventory(game) && active_quest != NULL && active_quest->definition != NULL && active_quest->stage >= 0 &&
         active_quest->stage < active_quest->definition->stage_count) {
         quest_title_width = MeasureText(active_quest->definition->title, 20);
         DrawRectangle(12, 168, 520, 56, Fade(RAYWHITE, 0.85f));

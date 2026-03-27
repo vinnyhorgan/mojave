@@ -60,8 +60,7 @@ typedef struct ItemRef {
 } ItemRef;
 
 typedef struct DialoguRef {
-    const MojaveDialogue *dialogue;
-    const char *start_id;
+    const char *dialogue_path;
 } DialoguRef;
 
 typedef struct ActiveDialogue {
@@ -119,6 +118,8 @@ typedef struct MojaveGame {
     int inventory_count;
     const char *save_path;
     bool save_loaded;
+    bool show_quest_log;
+    bool show_inventory;
     const MojaveDialogueNode *active_dialogue_node;
     int active_npc_index;
     int nearby_npc_index;
@@ -151,6 +152,9 @@ MojaveVec2 mojave_game_player_position(const MojaveGame *game);
 float mojave_game_player_size(void);
 bool mojave_game_save_loaded(const MojaveGame *game);
 bool mojave_game_dialogue_active(const MojaveGame *game);
+bool mojave_game_ui_blocking(const MojaveGame *game);
+bool mojave_game_show_quest_log(const MojaveGame *game);
+bool mojave_game_show_inventory(const MojaveGame *game);
 const MojaveDialogueNode *mojave_game_dialogue_node(const MojaveGame *game);
 int mojave_game_dialogue_selected_choice(const MojaveGame *game);
 int mojave_game_dialogue_visible_choice_count(const MojaveGame *game);

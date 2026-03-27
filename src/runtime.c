@@ -31,10 +31,12 @@ ECS_COMPONENT_DECLARE(Npc) = 0;
 ECS_COMPONENT_DECLARE(Item) = 0;
 
 static const MojaveMap *g_map = NULL;
-static MojaveGame *g_game = NULL;
 
 static bool mojave_game_add_inventory_item(MojaveGame *game, const MojaveItemDefinition *definition);
 static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item_id, int count);
+static bool mojave_game_collect_item_at_index(MojaveGame *game, int item_index);
+static bool mojave_game_validate_dialogue(const MojaveGame *game, const char *path, const MojaveDialogue *dialogue);
+static bool mojave_game_validate_content(const MojaveGame *game);
 
 static void MovementSystem(ecs_iter_t *it) {
     Position *p = ecs_field(it, Position, 1);
@@ -75,34 +77,6 @@ static void CombatSystem(ecs_iter_t *it) {
 
     for (int i = 0; i < it->count; i += 1) {
         if (hp[i].current <= 0.0f) {
-            ecs_delete(it->world, it->entities[i]);
-        }
-    }
-}
-
-static void PickupSystem(ecs_iter_t *it) {
-    Position *p = ecs_field(it, Position, 1);
-    Item *item = ecs_field(it, Item, 2);
-
-    if (g_game == NULL) {
-        return;
-    }
-
-    for (int i = 0; i < it->count; i += 1) {
-        MojaveVec2 player_pos = mojave_game_player_position(g_game);
-        float player_center_x = player_pos.x + MOJAVE_PLAYER_SIZE * 0.5f;
-        float player_center_y = player_pos.y + MOJAVE_PLAYER_SIZE * 0.5f;
-        float item_center_x = p[i].x + MOJAVE_ITEM_SIZE * 0.5f;
-        float item_center_y = p[i].y + MOJAVE_ITEM_SIZE * 0.5f;
-        float dx = item_center_x - player_center_x;
-        float dy = item_center_y - player_center_y;
-        float dist_sq = dx * dx + dy * dy;
-
-        if (dist_sq <= MOJAVE_ITEM_PICKUP_RANGE * MOJAVE_ITEM_PICKUP_RANGE) {
-            const MojaveItemDefinition *def = mojave_item_database_find(&g_game->item_database, g_game->map.items[item[i].map_index].item_id);
-            if (def != NULL) {
-                mojave_game_add_inventory_item(g_game, def);
-            }
             ecs_delete(it->world, it->entities[i]);
         }
     }
@@ -446,6 +420,41 @@ static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item
     return false;
 }
 
+static bool mojave_game_collect_item_at_index(MojaveGame *game, int item_index) {
+    const MojaveItemDefinition *definition;
+    ecs_entity_t entity;
+
+    if (game == NULL || item_index < 0 || item_index >= game->map.item_count) {
+        return false;
+    }
+    if (game->item_entities == NULL) {
+        return false;
+    }
+    if (game->map_item_collected != NULL && game->map_item_collected[item_index]) {
+        return false;
+    }
+
+    entity = game->item_entities[item_index];
+    if (entity == 0) {
+        return false;
+    }
+
+    definition = mojave_item_database_find(&game->item_database, game->map.items[item_index].item_id);
+    if (definition == NULL || !mojave_game_add_inventory_item(game, definition)) {
+        return false;
+    }
+
+    ecs_delete(game->world, entity);
+    game->item_entities[item_index] = 0;
+    if (game->map_item_collected != NULL) {
+        game->map_item_collected[item_index] = true;
+    }
+    if (game->nearby_item_index == item_index) {
+        game->nearby_item_index = -1;
+    }
+    return true;
+}
+
 static bool mojave_game_conditions_met(const MojaveGame *game, const MojaveCondition *conditions, int condition_count) {
     int i;
 
@@ -494,6 +503,151 @@ static int mojave_game_dialogue_choice_index_from_visible(const MojaveGame *game
     }
 
     return -1;
+}
+
+static bool mojave_game_validate_dialogue_actions(const MojaveGame *game,
+    const char *path,
+    const MojaveEventAction *actions,
+    int action_count) {
+    int i;
+
+    for (i = 0; i < action_count; i += 1) {
+        switch (actions[i].type) {
+            case MOJAVE_EVENT_ACTION_SET_FLAG:
+                if (actions[i].flag_id == NULL) {
+                    fprintf(stderr, "Dialogue '%s' has a set_flag action without a flag id\n", path);
+                    return false;
+                }
+                break;
+            case MOJAVE_EVENT_ACTION_START_QUEST:
+            case MOJAVE_EVENT_ACTION_SET_QUEST_STAGE:
+            case MOJAVE_EVENT_ACTION_COMPLETE_QUEST:
+                if (actions[i].quest_id == NULL || mojave_quest_log_find(&game->quest_log, actions[i].quest_id) == NULL) {
+                    fprintf(stderr, "Dialogue '%s' references unknown quest '%s'\n",
+                        path,
+                        actions[i].quest_id != NULL ? actions[i].quest_id : "<null>");
+                    return false;
+                }
+                break;
+            case MOJAVE_EVENT_ACTION_GIVE_ITEM:
+            case MOJAVE_EVENT_ACTION_REMOVE_ITEM:
+                if (actions[i].item_id == NULL || mojave_item_database_find(&game->item_database, actions[i].item_id) == NULL) {
+                    fprintf(stderr, "Dialogue '%s' references unknown item '%s'\n",
+                        path,
+                        actions[i].item_id != NULL ? actions[i].item_id : "<null>");
+                    return false;
+                }
+                break;
+            case MOJAVE_EVENT_ACTION_NONE:
+            default:
+                break;
+        }
+    }
+
+    return true;
+}
+
+static bool mojave_game_validate_dialogue_conditions(const MojaveGame *game,
+    const char *path,
+    const MojaveCondition *conditions,
+    int condition_count) {
+    int i;
+
+    for (i = 0; i < condition_count; i += 1) {
+        switch (conditions[i].type) {
+            case MOJAVE_CONDITION_HAS_ITEM:
+                if (conditions[i].item_id == NULL || mojave_item_database_find(&game->item_database, conditions[i].item_id) == NULL) {
+                    fprintf(stderr, "Dialogue '%s' references unknown item '%s' in a condition\n",
+                        path,
+                        conditions[i].item_id != NULL ? conditions[i].item_id : "<null>");
+                    return false;
+                }
+                break;
+            case MOJAVE_CONDITION_NONE:
+            default:
+                break;
+        }
+    }
+
+    return true;
+}
+
+static bool mojave_game_validate_dialogue(const MojaveGame *game, const char *path, const MojaveDialogue *dialogue) {
+    int i;
+
+    if (game == NULL || path == NULL || dialogue == NULL || dialogue->start_id == NULL) {
+        return false;
+    }
+    if (mojave_dialogue_find_node(dialogue, dialogue->start_id) == NULL) {
+        fprintf(stderr, "Dialogue '%s' start node '%s' does not exist\n", path, dialogue->start_id);
+        return false;
+    }
+
+    for (i = 0; i < dialogue->node_count; i += 1) {
+        const MojaveDialogueNode *node = &dialogue->nodes[i];
+        int choice_index;
+
+        if (node->next_id != NULL && mojave_dialogue_find_node(dialogue, node->next_id) == NULL) {
+            fprintf(stderr, "Dialogue '%s' node '%s' points to unknown next node '%s'\n", path, node->id, node->next_id);
+            return false;
+        }
+        if (!mojave_game_validate_dialogue_conditions(game, path, node->conditions, node->condition_count) ||
+            !mojave_game_validate_dialogue_actions(game, path, node->actions, node->action_count)) {
+            return false;
+        }
+
+        for (choice_index = 0; choice_index < node->choice_count; choice_index += 1) {
+            const MojaveDialogueChoice *choice = &node->choices[choice_index];
+
+            if (mojave_dialogue_find_node(dialogue, choice->next_id) == NULL) {
+                fprintf(stderr, "Dialogue '%s' node '%s' has a choice pointing to unknown node '%s'\n",
+                    path,
+                    node->id,
+                    choice->next_id);
+                return false;
+            }
+            if (!mojave_game_validate_dialogue_conditions(game, path, choice->conditions, choice->condition_count) ||
+                !mojave_game_validate_dialogue_actions(game, path, choice->actions, choice->action_count)) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool mojave_game_validate_content(const MojaveGame *game) {
+    int i;
+
+    if (game == NULL) {
+        return false;
+    }
+
+    for (i = 0; i < game->map.item_count; i += 1) {
+        if (mojave_item_database_find(&game->item_database, game->map.items[i].item_id) == NULL) {
+            fprintf(stderr, "Map references unknown item '%s'\n", game->map.items[i].item_id);
+            return false;
+        }
+    }
+
+    for (i = 0; i < game->map.npc_count; i += 1) {
+        MojaveDialogue dialogue = {0};
+        bool ok;
+
+        if (!mojave_dialogue_load(game->map.npcs[i].dialogue_path, &dialogue)) {
+            fprintf(stderr, "Failed to preload dialogue '%s' for npc '%s'\n",
+                game->map.npcs[i].dialogue_path,
+                game->map.npcs[i].id != NULL ? game->map.npcs[i].id : "<unknown>");
+            return false;
+        }
+        ok = mojave_game_validate_dialogue(game, game->map.npcs[i].dialogue_path, &dialogue);
+        mojave_dialogue_unload(&dialogue);
+        if (!ok) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 static bool mojave_game_write_save(MojaveGame *game, float player_x, float player_y) {
@@ -693,42 +847,30 @@ static bool mojave_game_read_save(MojaveGame *game, float *player_x, float *play
     return true;
 }
 
-static bool mojave_game_pick_up_item(MojaveGame *game, int item_index) {
-    const MojaveItemDefinition *definition;
-    ecs_entity_t entity;
-
-    if (game == NULL || item_index < 0 || item_index >= game->map.item_count) {
-        return false;
-    }
-
-    if (game->item_entities == NULL) {
-        return false;
-    }
-
-    entity = game->item_entities[item_index];
-    if (entity == 0) {
-        return false;
-    }
-
-    definition = mojave_item_database_find(&game->item_database, game->map.items[item_index].item_id);
-    if (definition == NULL || !mojave_game_add_inventory_item(game, definition)) {
-        return false;
-    }
-
-    ecs_delete(game->world, entity);
-    game->item_entities[item_index] = 0;
-    game->nearby_item_index = -1;
-    return true;
-}
-
 static bool mojave_game_load_npc_dialogue(MojaveGame *game, int npc_index) {
     MojaveDialogue dialogue = {0};
+    const DialoguRef *dialogue_ref;
+    ecs_entity_t npc_entity;
 
     if (game == NULL || npc_index < 0 || npc_index >= game->map.npc_count) {
         return false;
     }
 
-    if (!mojave_dialogue_load(game->map.npcs[npc_index].dialogue_path, &dialogue)) {
+    if (game->npc_entities == NULL) {
+        return false;
+    }
+
+    npc_entity = game->npc_entities[npc_index];
+    dialogue_ref = ecs_get(game->world, npc_entity, DialoguRef);
+    if (dialogue_ref == NULL || dialogue_ref->dialogue_path == NULL) {
+        return false;
+    }
+
+    if (!mojave_dialogue_load(dialogue_ref->dialogue_path, &dialogue)) {
+        return false;
+    }
+    if (!mojave_game_validate_dialogue(game, dialogue_ref->dialogue_path, &dialogue)) {
+        mojave_dialogue_unload(&dialogue);
         return false;
     }
 
@@ -751,6 +893,12 @@ static void mojave_game_set_dialogue_node(MojaveGame *game, const char *node_id)
     }
     game->active_dialogue_node = node;
     game->selected_dialogue_choice = 0;
+    if (game->npc_entities != NULL && game->active_npc_index >= 0 && game->active_npc_index < game->map.npc_count) {
+        ecs_set(game->world,
+            game->npc_entities[game->active_npc_index],
+            ActiveDialogue,
+            {node != NULL ? node->id : NULL});
+    }
     if (node != NULL) {
         mojave_game_run_actions(game, node->actions, node->action_count);
     }
@@ -772,13 +920,19 @@ static void mojave_game_start_dialogue(MojaveGame *game) {
 }
 
 static void mojave_game_end_dialogue(MojaveGame *game) {
+    int active_npc_index;
+
     if (game == NULL) {
         return;
     }
 
+    active_npc_index = game->active_npc_index;
     game->active_dialogue_node = NULL;
     game->active_npc_index = -1;
     game->selected_dialogue_choice = 0;
+    if (game->npc_entities != NULL && active_npc_index >= 0 && active_npc_index < game->map.npc_count) {
+        ecs_set(game->world, game->npc_entities[active_npc_index], ActiveDialogue, {NULL});
+    }
 }
 
 static void mojave_game_update_dialogue(MojaveGame *game, const MojaveInput *input) {
@@ -795,7 +949,7 @@ static void mojave_game_update_dialogue(MojaveGame *game, const MojaveInput *inp
     if (node == NULL) {
         if (input->interact_pressed) {
             if (game->nearby_item_index >= 0) {
-                mojave_game_pick_up_item(game, game->nearby_item_index);
+                mojave_game_collect_item_at_index(game, game->nearby_item_index);
             } else {
                 mojave_game_start_dialogue(game);
             }
@@ -874,6 +1028,13 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
         return false;
     }
 
+    if (!mojave_game_validate_content(game)) {
+        mojave_item_database_unload(&game->item_database);
+        mojave_quest_log_unload(&game->quest_log);
+        mojave_map_unload(&game->map);
+        return false;
+    }
+
     game->world = ecs_init();
     if (game->world == NULL) {
         mojave_item_database_unload(&game->item_database);
@@ -926,19 +1087,13 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     ECS_SYSTEM(game->world, MovementSystem, EcsOnUpdate, Position, Velocity);
     ECS_SYSTEM(game->world, TilemapCollisionSystem, EcsOnUpdate, Position, Velocity, CollisionBox);
     ECS_SYSTEM(game->world, CombatSystem, EcsOnUpdate, Hp);
-    ECS_SYSTEM(game->world, PickupSystem, EcsOnUpdate, Position, Item);
 
     g_map = &game->map;
-    g_game = game;
 
-    game->player = ecs_new(game->world);
-    ecs_set(game->world, game->player, Position,
-        { (float)(game->map.player_spawn_x * game->map.tile_size + 7),
-          (float)(game->map.player_spawn_y * game->map.tile_size + 7) });
-    ecs_set(game->world, game->player, Velocity, {0.0f, 0.0f});
-    ecs_set(game->world, game->player, CollisionBox, {MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE});
-    ecs_set(game->world, game->player, Team, {MOJAVE_TEAM_PLAYER});
-    ecs_set(game->world, game->player, Hp, {100.0f, 100.0f});
+    game->player = mojave_game_spawn_player_ecs(
+        game,
+        (float)(game->map.player_spawn_x * game->map.tile_size + 7),
+        (float)(game->map.player_spawn_y * game->map.tile_size + 7));
 
     position = ecs_get_mut(game->world, game->player, Position);
     if (mojave_game_read_save(game, &position->x, &position->y)) {
@@ -946,7 +1101,6 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     }
 
     if (game->map.npc_count > 0) {
-        MojaveDialogue dialogue = {0};
         game->npc_entities = malloc((size_t)game->map.npc_count * sizeof(*game->npc_entities));
         if (game->npc_entities == NULL) {
             ecs_fini(game->world);
@@ -961,12 +1115,7 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
             return false;
         }
         for (i = 0; i < game->map.npc_count; i += 1) {
-            memset(&dialogue, 0, sizeof(dialogue));
-            if (game->map.npcs[i].dialogue_path != NULL) {
-                mojave_dialogue_load(game->map.npcs[i].dialogue_path, &dialogue);
-            }
-            game->npc_entities[i] = mojave_game_spawn_npc_ecs(game, &game->map.npcs[i], dialogue.start_id != NULL ? &dialogue : NULL);
-            mojave_dialogue_unload(&dialogue);
+            game->npc_entities[i] = mojave_game_spawn_npc_ecs(game, &game->map.npcs[i], NULL);
         }
     }
 
@@ -1013,15 +1162,14 @@ ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_de
     ecs_entity_t e = ecs_new(game->world);
     float wx = (float)(npc_def->spawn_x * game->map.tile_size + 7);
     float wy = (float)(npc_def->spawn_y * game->map.tile_size + 7);
+    (void)dialogue;
     ecs_set(game->world, e, Position, {wx, wy});
     ecs_set(game->world, e, Velocity, {0.0f, 0.0f});
     ecs_set(game->world, e, CollisionBox, {MOJAVE_NPC_SIZE, MOJAVE_NPC_SIZE});
     ecs_set(game->world, e, Renderable, {npc_def->outfit_r, npc_def->outfit_g, npc_def->outfit_b, 255});
     ecs_set(game->world, e, Team, {MOJAVE_TEAM_FRIENDLY});
-    ecs_set(game->world, e, DialoguRef, {dialogue, dialogue ? dialogue->start_id : NULL});
-    if (dialogue && dialogue->start_id) {
-        ecs_set(game->world, e, ActiveDialogue, {dialogue->start_id});
-    }
+    ecs_set(game->world, e, DialoguRef, {npc_def->dialogue_path});
+    ecs_set(game->world, e, ActiveDialogue, {NULL});
     ecs_set(game->world, e, Npc, {npc_def->name});
     return e;
 }
@@ -1235,9 +1383,28 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
         return;
     }
 
+    if (input != NULL && !mojave_game_dialogue_active(game)) {
+        if (input->quest_log_pressed) {
+            game->show_quest_log = !game->show_quest_log;
+            if (game->show_quest_log) {
+                game->show_inventory = false;
+            }
+        }
+        if (input->inventory_pressed) {
+            game->show_inventory = !game->show_inventory;
+            if (game->show_inventory) {
+                game->show_quest_log = false;
+            }
+        }
+    }
+
     dialogue_was_active = game->active_dialogue_node != NULL;
     mojave_game_update_dialogue(game, input);
     if (dialogue_was_active || game->active_dialogue_node != NULL) {
+        return;
+    }
+
+    if (game->show_quest_log || game->show_inventory) {
         return;
     }
 
@@ -1245,7 +1412,6 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     velocity = mojave_velocity_from_input(input);
     ecs_set(game->world, game->player, Velocity, {velocity.x, velocity.y});
 
-    /* Run ECS systems (MovementSystem, TilemapCollisionSystem, CombatSystem, PickupSystem) */
     ecs_progress(game->world, dt);
 
     if (input != NULL && input->save_pressed) {
@@ -1339,6 +1505,18 @@ bool mojave_game_save_loaded(const MojaveGame *game) {
 
 bool mojave_game_dialogue_active(const MojaveGame *game) {
     return game != NULL && game->active_dialogue_node != NULL;
+}
+
+bool mojave_game_ui_blocking(const MojaveGame *game) {
+    return game != NULL && (game->show_quest_log || game->show_inventory || game->active_dialogue_node != NULL);
+}
+
+bool mojave_game_show_quest_log(const MojaveGame *game) {
+    return game != NULL && game->show_quest_log;
+}
+
+bool mojave_game_show_inventory(const MojaveGame *game) {
+    return game != NULL && game->show_inventory;
 }
 
 const MojaveDialogueNode *mojave_game_dialogue_node(const MojaveGame *game) {
