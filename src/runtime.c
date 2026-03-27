@@ -28,6 +28,10 @@ ECS_COMPONENT_DECLARE(ItemRef) = 0;
 ECS_COMPONENT_DECLARE(DialoguRef) = 0;
 ECS_COMPONENT_DECLARE(ActiveDialogue) = 0;
 ECS_COMPONENT_DECLARE(Npc) = 0;
+ECS_COMPONENT_DECLARE(Item) = 0;
+
+static const MojaveMap *g_map = NULL;
+static MojaveGame *g_game = NULL;
 
 static bool mojave_game_add_inventory_item(MojaveGame *game, const MojaveItemDefinition *definition);
 static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item_id, int count);
@@ -39,6 +43,68 @@ static void MovementSystem(ecs_iter_t *it) {
     for (int i = 0; i < it->count; i += 1) {
         p[i].x += v[i].x * it->delta_time;
         p[i].y += v[i].y * it->delta_time;
+    }
+}
+
+static void TilemapCollisionSystem(ecs_iter_t *it) {
+    Position *p = ecs_field(it, Position, 1);
+    Velocity *v = ecs_field(it, Velocity, 2);
+    CollisionBox *cb = ecs_field(it, CollisionBox, 3);
+
+    if (g_map == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < it->count; i += 1) {
+        MojaveRect rect = {p[i].x, p[i].y, cb[i].w, cb[i].h};
+        MojaveCollisionMoveResult result;
+
+        if (mojave_collision_move_rect(g_map, &rect, p[i].x + v[i].x * it->delta_time, p[i].y + v[i].y * it->delta_time, &result)) {
+            p[i].x = result.x;
+            p[i].y = result.y;
+            if (result.collided) {
+                v[i].x = 0.0f;
+                v[i].y = 0.0f;
+            }
+        }
+    }
+}
+
+static void CombatSystem(ecs_iter_t *it) {
+    Hp *hp = ecs_field(it, Hp, 1);
+
+    for (int i = 0; i < it->count; i += 1) {
+        if (hp[i].current <= 0.0f) {
+            ecs_delete(it->world, it->entities[i]);
+        }
+    }
+}
+
+static void PickupSystem(ecs_iter_t *it) {
+    Position *p = ecs_field(it, Position, 1);
+    Item *item = ecs_field(it, Item, 2);
+
+    if (g_game == NULL) {
+        return;
+    }
+
+    for (int i = 0; i < it->count; i += 1) {
+        MojaveVec2 player_pos = mojave_game_player_position(g_game);
+        float player_center_x = player_pos.x + MOJAVE_PLAYER_SIZE * 0.5f;
+        float player_center_y = player_pos.y + MOJAVE_PLAYER_SIZE * 0.5f;
+        float item_center_x = p[i].x + MOJAVE_ITEM_SIZE * 0.5f;
+        float item_center_y = p[i].y + MOJAVE_ITEM_SIZE * 0.5f;
+        float dx = item_center_x - player_center_x;
+        float dy = item_center_y - player_center_y;
+        float dist_sq = dx * dx + dy * dy;
+
+        if (dist_sq <= MOJAVE_ITEM_PICKUP_RANGE * MOJAVE_ITEM_PICKUP_RANGE) {
+            const MojaveItemDefinition *def = mojave_item_database_find(&g_game->item_database, g_game->map.items[item[i].map_index].item_id);
+            if (def != NULL) {
+                mojave_game_add_inventory_item(g_game, def);
+            }
+            ecs_delete(it->world, it->entities[i]);
+        }
     }
 }
 
@@ -60,38 +126,6 @@ static Velocity mojave_velocity_from_input(const MojaveInput *input) {
     }
 
     return velocity;
-}
-
-static void mojave_move_player(const MojaveMap *map, Position *position, Velocity velocity, float dt) {
-    MojaveRect player_rect;
-    MojaveCollisionMoveResult move_result;
-
-    if (position == NULL) {
-        return;
-    }
-
-    player_rect.x = position->x;
-    player_rect.y = position->y;
-    player_rect.w = MOJAVE_PLAYER_SIZE;
-    player_rect.h = MOJAVE_PLAYER_SIZE;
-
-    if (mojave_collision_move_rect(
-            map,
-            &player_rect,
-            position->x + velocity.x * dt,
-            position->y + velocity.y * dt,
-            &move_result)) {
-        position->x = move_result.x;
-        position->y = move_result.y;
-    }
-}
-
-static float mojave_map_item_world_x(const MojaveMap *map, const MojaveMapItem *item) {
-    return (float)(item->spawn_x * map->tile_size + 10);
-}
-
-static float mojave_map_item_world_y(const MojaveMap *map, const MojaveMapItem *item) {
-    return (float)(item->spawn_y * map->tile_size + 10);
 }
 
 static MojaveFlagState *mojave_game_get_flag(MojaveGame *game, const char *flag_id) {
@@ -301,7 +335,7 @@ static int mojave_game_find_nearby_item(const MojaveGame *game) {
     int best_index = -1;
     int i;
 
-    if (game == NULL) {
+    if (game == NULL || game->item_entities == NULL) {
         return -1;
     }
 
@@ -310,22 +344,24 @@ static int mojave_game_find_nearby_item(const MojaveGame *game) {
     player_center_y = player_position.y + MOJAVE_PLAYER_SIZE * 0.5f;
 
     for (i = 0; i < game->map.item_count; i += 1) {
-        float item_x;
-        float item_y;
+        const Position *pos;
         float item_center_x;
         float item_center_y;
         float dx;
         float dy;
         float distance_sq;
 
-        if (game->map_item_collected != NULL && game->map_item_collected[i]) {
+        if (game->item_entities[i] == 0) {
             continue;
         }
 
-        item_x = mojave_map_item_world_x(&game->map, &game->map.items[i]);
-        item_y = mojave_map_item_world_y(&game->map, &game->map.items[i]);
-        item_center_x = item_x + MOJAVE_ITEM_SIZE * 0.5f;
-        item_center_y = item_y + MOJAVE_ITEM_SIZE * 0.5f;
+        pos = ecs_get(game->world, game->item_entities[i], Position);
+        if (pos == NULL) {
+            continue;
+        }
+
+        item_center_x = pos->x + MOJAVE_ITEM_SIZE * 0.5f;
+        item_center_y = pos->y + MOJAVE_ITEM_SIZE * 0.5f;
         dx = item_center_x - player_center_x;
         dy = item_center_y - player_center_y;
         distance_sq = dx * dx + dy * dy;
@@ -659,9 +695,18 @@ static bool mojave_game_read_save(MojaveGame *game, float *player_x, float *play
 
 static bool mojave_game_pick_up_item(MojaveGame *game, int item_index) {
     const MojaveItemDefinition *definition;
+    ecs_entity_t entity;
 
-    if (game == NULL || item_index < 0 || item_index >= game->map.item_count ||
-        game->map_item_collected == NULL || game->map_item_collected[item_index]) {
+    if (game == NULL || item_index < 0 || item_index >= game->map.item_count) {
+        return false;
+    }
+
+    if (game->item_entities == NULL) {
+        return false;
+    }
+
+    entity = game->item_entities[item_index];
+    if (entity == 0) {
         return false;
     }
 
@@ -670,7 +715,8 @@ static bool mojave_game_pick_up_item(MojaveGame *game, int item_index) {
         return false;
     }
 
-    game->map_item_collected[item_index] = true;
+    ecs_delete(game->world, entity);
+    game->item_entities[item_index] = 0;
     game->nearby_item_index = -1;
     return true;
 }
@@ -875,8 +921,15 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     ECS_COMPONENT_DEFINE(game->world, DialoguRef);
     ECS_COMPONENT_DEFINE(game->world, ActiveDialogue);
     ECS_COMPONENT_DEFINE(game->world, Npc);
+    ECS_COMPONENT_DEFINE(game->world, Item);
 
     ECS_SYSTEM(game->world, MovementSystem, EcsOnUpdate, Position, Velocity);
+    ECS_SYSTEM(game->world, TilemapCollisionSystem, EcsOnUpdate, Position, Velocity, CollisionBox);
+    ECS_SYSTEM(game->world, CombatSystem, EcsOnUpdate, Hp);
+    ECS_SYSTEM(game->world, PickupSystem, EcsOnUpdate, Position, Item);
+
+    g_map = &game->map;
+    g_game = game;
 
     game->player = ecs_new(game->world);
     ecs_set(game->world, game->player, Position,
@@ -917,6 +970,31 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
         }
     }
 
+    if (game->map.item_count > 0) {
+        const MojaveItemDefinition *def;
+        game->item_entities = malloc((size_t)game->map.item_count * sizeof(*game->item_entities));
+        if (game->item_entities == NULL) {
+            ecs_fini(game->world);
+            game->world = NULL;
+            free(game->npc_entities);
+            game->npc_entities = NULL;
+            free(game->quest_states);
+            game->quest_states = NULL;
+            free(game->map_item_collected);
+            game->map_item_collected = NULL;
+            mojave_item_database_unload(&game->item_database);
+            mojave_quest_log_unload(&game->quest_log);
+            mojave_map_unload(&game->map);
+            return false;
+        }
+        for (i = 0; i < game->map.item_count; i += 1) {
+            float wx = (float)(game->map.items[i].spawn_x * game->map.tile_size + 10);
+            float wy = (float)(game->map.items[i].spawn_y * game->map.tile_size + 10);
+            def = mojave_item_database_find(&game->item_database, game->map.items[i].item_id);
+            game->item_entities[i] = mojave_game_spawn_item_ecs(game, def, wx, wy, i);
+        }
+    }
+
     return true;
 }
 
@@ -948,12 +1026,13 @@ ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_de
     return e;
 }
 
-ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y) {
+ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y, int map_index) {
     ecs_entity_t e = ecs_new(game->world);
     ecs_set(game->world, e, Position, {x, y});
     ecs_set(game->world, e, CollisionBox, {MOJAVE_ITEM_SIZE, MOJAVE_ITEM_SIZE});
     ecs_set(game->world, e, Renderable, {item_def->color_r, item_def->color_g, item_def->color_b, 255});
     ecs_set(game->world, e, ItemRef, {item_def});
+    ecs_set(game->world, e, Item, {map_index});
     return e;
 }
 
@@ -999,31 +1078,43 @@ bool mojave_game_get_entity_render_data(const MojaveGame *game, ecs_entity_t ent
 }
 
 bool mojave_game_get_item_render_data(const MojaveGame *game, int index, MojaveItemRenderData *out) {
-    const MojaveMapItem *item;
-    const MojaveItemDefinition *def;
-    int tile_size;
+    const Position *pos;
+    const Renderable *r;
+    const ItemRef *item_ref;
+    ecs_entity_t entity;
 
     if (game == NULL || index < 0 || index >= game->map.item_count) {
         return false;
     }
 
-    item = &game->map.items[index];
-    def = mojave_item_database_find(&game->item_database, item->item_id);
-    if (def == NULL) {
+    if (game->item_entities == NULL) {
         return false;
     }
 
-    tile_size = game->map.tile_size;
-    out->x = (float)(item->spawn_x * tile_size + 10);
-    out->y = (float)(item->spawn_y * tile_size + 10);
+    entity = game->item_entities[index];
+    if (entity == 0) {
+        out->collected = true;
+        return true;
+    }
+
+    pos = ecs_get(game->world, entity, Position);
+    r = ecs_get(game->world, entity, Renderable);
+    item_ref = ecs_get(game->world, entity, ItemRef);
+
+    if (pos == NULL || r == NULL || item_ref == NULL) {
+        return false;
+    }
+
+    out->x = pos->x;
+    out->y = pos->y;
     out->w = MOJAVE_ITEM_SIZE;
     out->h = MOJAVE_ITEM_SIZE;
-    out->r = def->color_r;
-    out->g = def->color_g;
-    out->b = def->color_b;
-    out->a = 255;
-    out->collected = game->map_item_collected != NULL && game->map_item_collected[index];
-    out->name = def->name;
+    out->r = r->r;
+    out->g = r->g;
+    out->b = r->b;
+    out->a = r->a;
+    out->collected = false;
+    out->name = item_ref->definition ? item_ref->definition->name : "Unknown";
     return true;
 }
 
@@ -1122,6 +1213,8 @@ void mojave_game_shutdown(MojaveGame *game) {
     game->quest_state_count = 0;
     free(game->npc_entities);
     game->npc_entities = NULL;
+    free(game->item_entities);
+    game->item_entities = NULL;
     free(game->inventory);
     game->inventory = NULL;
     game->inventory_count = 0;
@@ -1152,11 +1245,8 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
     velocity = mojave_velocity_from_input(input);
     ecs_set(game->world, game->player, Velocity, {velocity.x, velocity.y});
 
-    /* Run ECS systems (MovementSystem for entities with Position + Velocity) */
+    /* Run ECS systems (MovementSystem, TilemapCollisionSystem, CombatSystem, PickupSystem) */
     ecs_progress(game->world, dt);
-
-    /* Manual movement with collision for player (overrides ECS movement) */
-    mojave_move_player(&game->map, position, velocity, dt);
 
     if (input != NULL && input->save_pressed) {
         if (mojave_game_write_save(game, position->x, position->y)) {
@@ -1192,6 +1282,22 @@ void mojave_game_update(MojaveGame *game, const MojaveInput *input, float dt) {
             position->x = save_x;
             position->y = save_y;
             game->save_loaded = true;
+        }
+        if (game->item_entities != NULL) {
+            const MojaveItemDefinition *def;
+            for (i = 0; i < game->map.item_count; i += 1) {
+                if (game->item_entities[i] != 0) {
+                    ecs_delete(game->world, game->item_entities[i]);
+                }
+                if (game->map_item_collected != NULL && game->map_item_collected[i]) {
+                    game->item_entities[i] = 0;
+                } else {
+                    float wx = (float)(game->map.items[i].spawn_x * game->map.tile_size + 10);
+                    float wy = (float)(game->map.items[i].spawn_y * game->map.tile_size + 10);
+                    def = mojave_item_database_find(&game->item_database, game->map.items[i].item_id);
+                    game->item_entities[i] = mojave_game_spawn_item_ecs(game, def, wx, wy, i);
+                }
+            }
         }
     }
 }

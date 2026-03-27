@@ -72,6 +72,10 @@ typedef struct Npc {
     const char *name;
 } Npc;
 
+typedef struct Item {
+    int map_index;
+} Item;
+
 typedef enum {
     MOJAVE_TEAM_NONE = 0,
     MOJAVE_TEAM_PLAYER = 1,
@@ -107,6 +111,7 @@ typedef struct MojaveGame {
     MojaveQuestState *quest_states;
     int quest_state_count;
     ecs_entity_t *npc_entities;
+    ecs_entity_t *item_entities;
     MojaveFlagState *flags;
     int flag_count;
     bool *map_item_collected;
@@ -131,6 +136,7 @@ extern ECS_COMPONENT_DECLARE(ItemRef);
 extern ECS_COMPONENT_DECLARE(DialoguRef);
 extern ECS_COMPONENT_DECLARE(ActiveDialogue);
 extern ECS_COMPONENT_DECLARE(Npc);
+extern ECS_COMPONENT_DECLARE(Item);
 
 extern const float MOJAVE_PLAYER_SIZE;
 extern const float MOJAVE_NPC_SIZE;
@@ -165,7 +171,7 @@ const MojaveQuestState *mojave_game_completed_quest(const MojaveGame *game, int 
 
 ecs_entity_t mojave_game_spawn_player_ecs(MojaveGame *game, float x, float y);
 ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_def, const MojaveDialogue *dialogue);
-ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y);
+ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y, int map_index);
 
 void mojave_game_damage_entity(MojaveGame *game, ecs_entity_t entity, float damage);
 float mojave_game_get_entity_hp(MojaveGame *game, ecs_entity_t entity);
