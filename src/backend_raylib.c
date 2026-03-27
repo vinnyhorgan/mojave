@@ -87,18 +87,26 @@ static void mojave_backend_update_camera(const MojaveGame *game) {
     };
 }
 
-static void mojave_backend_draw_map(const MojaveMap *map) {
+static void mojave_backend_draw_map(const MojaveGame *game) {
+    const MojaveMap *map = mojave_game_map(game);
+    int tile_size;
     int x;
     int y;
 
-    for (y = 0; y < map->height; y += 1) {
-        for (x = 0; x < map->width; x += 1) {
-            int tile = map->tiles[y * map->width + x];
+    if (map == NULL) {
+        return;
+    }
+
+    tile_size = mojave_map_get_tile_size(map);
+
+    for (y = 0; y < mojave_map_get_height(map); y += 1) {
+        for (x = 0; x < mojave_map_get_width(map); x += 1) {
+            int tile = mojave_map_get_tile(map, x, y);
             Rectangle rect = {
-                (float)(x * map->tile_size),
-                (float)(y * map->tile_size),
-                (float)map->tile_size,
-                (float)map->tile_size,
+                (float)(x * tile_size),
+                (float)(y * tile_size),
+                (float)tile_size,
+                (float)tile_size,
             };
             rect = mojave_backend_snap_rect(rect);
 
@@ -108,62 +116,31 @@ static void mojave_backend_draw_map(const MojaveMap *map) {
     }
 }
 
-static void mojave_backend_draw_npcs(const MojaveGame *game) {
-    int i;
-    int nearby_npc_index = mojave_game_nearby_npc_index(game);
-    const MojaveMap *map = mojave_game_map(game);
-
-    for (i = 0; i < mojave_game_npc_count(game); i += 1) {
-        const MojaveNpc *npc = mojave_game_npc(game, i);
-        Rectangle rect;
-        Color fill_color;
-        Color outline_color;
-
-        if (npc == NULL) {
-            continue;
-        }
-
-        rect.x = (float)(npc->spawn_x * map->tile_size + 7);
-        rect.y = (float)(npc->spawn_y * map->tile_size + 7);
-        rect.width = MOJAVE_NPC_SIZE;
-        rect.height = MOJAVE_NPC_SIZE;
-        rect = mojave_backend_snap_rect(rect);
-        fill_color = (Color){npc->outfit_r, npc->outfit_g, npc->outfit_b, 255};
-        outline_color = i == nearby_npc_index ? (Color){236, 204, 110, 255} : (Color){45, 31, 26, 255};
-
-        DrawRectangleRec(rect, fill_color);
-        mojave_backend_draw_rect_outline(rect, 2, outline_color);
-        DrawText(npc->name, (int)rect.x - 6, (int)rect.y - 18, 10, outline_color);
-    }
-}
-
 static void mojave_backend_draw_items(const MojaveGame *game) {
-    const MojaveMap *map = mojave_game_map(game);
-    int nearby_item_index = mojave_game_nearby_item_index(game);
+    MojaveItemRenderData item_data;
+    Rectangle rect;
+    Color fill_color;
+    Color outline_color;
+    int nearby_item_index;
     int i;
+
+    nearby_item_index = mojave_game_nearby_item_index(game);
 
     for (i = 0; i < mojave_game_map_item_count(game); i += 1) {
-        const MojaveMapItem *item = mojave_game_map_item(game, i);
-        const MojaveItemDefinition *definition;
-        Rectangle rect;
-        Color fill_color;
-        Color outline_color;
-
-        if (item == NULL || mojave_game_map_item_collected(game, i)) {
+        if (!mojave_game_get_item_render_data(game, i, &item_data)) {
             continue;
         }
 
-        definition = mojave_item_database_find(&game->item_database, item->item_id);
-        if (definition == NULL) {
+        if (item_data.collected) {
             continue;
         }
 
-        rect.x = (float)(item->spawn_x * map->tile_size + 10);
-        rect.y = (float)(item->spawn_y * map->tile_size + 10);
-        rect.width = MOJAVE_ITEM_SIZE;
-        rect.height = MOJAVE_ITEM_SIZE;
+        rect.x = item_data.x;
+        rect.y = item_data.y;
+        rect.width = item_data.w;
+        rect.height = item_data.h;
         rect = mojave_backend_snap_rect(rect);
-        fill_color = (Color){definition->color_r, definition->color_g, definition->color_b, 255};
+        fill_color = (Color){item_data.r, item_data.g, item_data.b, item_data.a};
         outline_color = i == nearby_item_index ? GOLD : (Color){53, 42, 31, 255};
 
         DrawRectangleRec(rect, fill_color);
@@ -171,21 +148,57 @@ static void mojave_backend_draw_items(const MojaveGame *game) {
     }
 }
 
+static void mojave_backend_draw_npcs(const MojaveGame *game) {
+    MojaveNpcRenderData npc_data;
+    Rectangle rect;
+    Color fill_color;
+    Color outline_color;
+    int nearby_npc_index;
+    int i;
+
+    nearby_npc_index = mojave_game_nearby_npc_index(game);
+
+    for (i = 0; i < mojave_game_npc_count(game); i += 1) {
+        if (!mojave_game_get_npc_render_data(game, i, &npc_data)) {
+            continue;
+        }
+
+        rect.x = npc_data.x;
+        rect.y = npc_data.y;
+        rect.width = npc_data.w;
+        rect.height = npc_data.h;
+        rect = mojave_backend_snap_rect(rect);
+        fill_color = (Color){npc_data.r, npc_data.g, npc_data.b, npc_data.a};
+        outline_color = i == nearby_npc_index ? (Color){236, 204, 110, 255} : (Color){45, 31, 26, 255};
+
+        DrawRectangleRec(rect, fill_color);
+        mojave_backend_draw_rect_outline(rect, 2, outline_color);
+        DrawText(npc_data.name, (int)rect.x - 6, (int)rect.y - 18, 10, outline_color);
+    }
+}
+
 static void mojave_backend_draw_dialogue(const MojaveGame *game) {
-    const MojaveDialogueNode *node = mojave_game_dialogue_node(game);
+    const MojaveDialogueNode *node;
     const MojaveDialogueChoice *choice;
-    int box_x = 40;
-    int box_y = GetScreenHeight() - MOJAVE_DIALOG_BOX_OFFSET_Y;
-    int box_width = GetScreenWidth() - 80;
-    int max_visible_choices = 4;
-    int first_visible_choice = 0;
+    int box_x;
+    int box_y;
+    int box_width;
+    int max_visible_choices;
+    int first_visible_choice;
     int i;
     int selected_choice;
     int visible_choice_count;
 
+    node = mojave_game_dialogue_node(game);
     if (node == NULL) {
         return;
     }
+
+    box_x = 40;
+    box_y = GetScreenHeight() - MOJAVE_DIALOG_BOX_OFFSET_Y;
+    box_width = GetScreenWidth() - 80;
+    max_visible_choices = 4;
+    first_visible_choice = 0;
 
     selected_choice = mojave_game_dialogue_selected_choice(game);
     visible_choice_count = mojave_game_dialogue_visible_choice_count(game);
@@ -223,14 +236,13 @@ static void mojave_backend_draw_dialogue(const MojaveGame *game) {
 }
 
 static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
-    const MojaveMapItem *item;
-    const MojaveItemDefinition *definition;
-    const char *hint = "E / Enter / Space";
+    MojaveItemRenderData item_data;
+    const char *hint;
     char prompt[256];
-    int panel_x = 12;
-    int panel_y = GetScreenHeight() - 88;
-    int panel_width = 460;
-    int panel_height = 64;
+    int panel_x;
+    int panel_y;
+    int panel_width;
+    int panel_height;
     int hint_width;
     int prompt_width;
     int nearby_item_index;
@@ -239,22 +251,22 @@ static void mojave_backend_draw_interaction_prompt(const MojaveGame *game) {
         return;
     }
 
+    hint = "E / Enter / Space";
+    panel_x = 12;
+    panel_y = GetScreenHeight() - 88;
+    panel_width = 460;
+    panel_height = 64;
+
     nearby_item_index = mojave_game_nearby_item_index(game);
     if (nearby_item_index < 0) {
         return;
     }
 
-    item = mojave_game_map_item(game, nearby_item_index);
-    if (item == NULL) {
+    if (!mojave_game_get_item_render_data(game, nearby_item_index, &item_data)) {
         return;
     }
 
-    definition = mojave_item_database_find(&game->item_database, item->item_id);
-    if (definition == NULL) {
-        return;
-    }
-
-    snprintf(prompt, sizeof(prompt), "Pick up: %s", definition->name);
+    snprintf(prompt, sizeof(prompt), "Pick up: %s", item_data.name);
     hint_width = MeasureText(hint, 20);
     prompt_width = panel_width - 24 - 24;
 
@@ -291,8 +303,9 @@ static void mojave_backend_draw_quest_log(const MojaveGame *game) {
         y += 28;
     }
     for (i = 0; i < active_count; i += 1) {
-        const MojaveQuestState *quest = mojave_game_active_quest(game, i);
+        const MojaveQuestState *quest;
 
+        quest = mojave_game_active_quest(game, i);
         if (quest == NULL || quest->definition == NULL) {
             continue;
         }
@@ -313,8 +326,9 @@ static void mojave_backend_draw_quest_log(const MojaveGame *game) {
         return;
     }
     for (i = 0; i < completed_count; i += 1) {
-        const MojaveQuestState *quest = mojave_game_completed_quest(game, i);
+        const MojaveQuestState *quest;
 
+        quest = mojave_game_completed_quest(game, i);
         if (quest == NULL || quest->definition == NULL) {
             continue;
         }
@@ -343,9 +357,10 @@ static void mojave_backend_draw_inventory(const MojaveGame *game) {
     }
 
     for (i = 0; i < mojave_game_inventory_count(game); i += 1) {
-        const MojaveInventoryEntry *entry = mojave_game_inventory_entry(game, i);
+        const MojaveInventoryEntry *entry;
         Rectangle swatch;
 
+        entry = mojave_game_inventory_entry(game, i);
         if (entry == NULL || entry->definition == NULL) {
             continue;
         }
@@ -440,11 +455,13 @@ void mojave_backend_draw(const MojaveGame *game) {
     const MojaveMap *map;
     const MojaveQuestState *active_quest;
     MojaveVec2 player_position;
+    MojaveRenderData player_render;
     float player_size;
     int quest_title_width;
     int map_width_px;
     int map_height_px;
     Rectangle player_rect;
+    ecs_entity_t player;
 
     if (game == NULL) {
         return;
@@ -454,19 +471,29 @@ void mojave_backend_draw(const MojaveGame *game) {
     active_quest = mojave_game_active_quest(game, 0);
     player_position = mojave_game_player_position(game);
     player_size = mojave_game_player_size();
+    player = mojave_game_get_player(game);
 
     mojave_backend_update_camera(game);
 
-    map_width_px = map->width * map->tile_size;
-    map_height_px = map->height * map->tile_size;
-    player_rect = (Rectangle){player_position.x, player_position.y, player_size, player_size};
+    if (mojave_game_get_entity_render_data(game, player, &player_render)) {
+        player_rect.x = player_render.x;
+        player_rect.y = player_render.y;
+    } else {
+        player_rect.x = player_position.x;
+        player_rect.y = player_position.y;
+    }
+    player_rect.width = player_size;
+    player_rect.height = player_size;
     player_rect = mojave_backend_snap_rect(player_rect);
+
+    map_width_px = mojave_map_get_width(map) * mojave_map_get_tile_size(map);
+    map_height_px = mojave_map_get_height(map) * mojave_map_get_tile_size(map);
 
     BeginDrawing();
     ClearBackground((Color){205, 197, 176, 255});
 
     BeginMode2D(g_camera);
-    mojave_backend_draw_map(map);
+    mojave_backend_draw_map(game);
     mojave_backend_draw_items(game);
     mojave_backend_draw_npcs(game);
     DrawRectangleRec(player_rect, (Color){42, 122, 184, 255});
@@ -476,7 +503,7 @@ void mojave_backend_draw(const MojaveGame *game) {
 
     DrawRectangle(12, 12, 420, 148, Fade(RAYWHITE, 0.85f));
     DrawRectangleLines(12, 12, 420, 148, DARKGRAY);
-    DrawText(map->name, 24, 24, 20, BLACK);
+    mojave_backend_draw_text_fitted(mojave_map_get_name(map), 24, 24, 20, 400, BLACK);
     DrawText("Move: WASD / Arrows", 24, 52, 20, BLACK);
     DrawText("Talk: Enter / Space / E", 24, 74, 20, BLACK);
     DrawText("Quests: J / Tab", 24, 96, 20, BLACK);

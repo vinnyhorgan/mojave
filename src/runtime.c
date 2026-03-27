@@ -936,6 +936,114 @@ bool mojave_game_entity_is_alive(MojaveGame *game, ecs_entity_t entity) {
     return hp != NULL && hp->current > 0.0f;
 }
 
+ecs_entity_t mojave_game_get_player(const MojaveGame *game) {
+    return game->player;
+}
+
+bool mojave_game_get_entity_render_data(const MojaveGame *game, ecs_entity_t entity, MojaveRenderData *out) {
+    const Position *pos = ecs_get(game->world, entity, Position);
+    const Renderable *r = ecs_get(game->world, entity, Renderable);
+
+    if (pos == NULL || r == NULL) {
+        return false;
+    }
+
+    out->x = pos->x;
+    out->y = pos->y;
+    out->r = r->r;
+    out->g = r->g;
+    out->b = r->b;
+    out->a = r->a;
+    return true;
+}
+
+bool mojave_game_get_item_render_data(const MojaveGame *game, int index, MojaveItemRenderData *out) {
+    const MojaveMapItem *item;
+    const MojaveItemDefinition *def;
+    int tile_size;
+
+    if (game == NULL || index < 0 || index >= game->map.item_count) {
+        return false;
+    }
+
+    item = &game->map.items[index];
+    def = mojave_item_database_find(&game->item_database, item->item_id);
+    if (def == NULL) {
+        return false;
+    }
+
+    tile_size = game->map.tile_size;
+    out->x = (float)(item->spawn_x * tile_size + 10);
+    out->y = (float)(item->spawn_y * tile_size + 10);
+    out->w = MOJAVE_ITEM_SIZE;
+    out->h = MOJAVE_ITEM_SIZE;
+    out->r = def->color_r;
+    out->g = def->color_g;
+    out->b = def->color_b;
+    out->a = 255;
+    out->collected = game->map_item_collected != NULL && game->map_item_collected[index];
+    out->name = def->name;
+    return true;
+}
+
+bool mojave_game_get_npc_render_data(const MojaveGame *game, int index, MojaveNpcRenderData *out) {
+    const MojaveNpc *npc;
+    int tile_size;
+
+    if (game == NULL || index < 0 || index >= game->map.npc_count) {
+        return false;
+    }
+
+    npc = &game->map.npcs[index];
+    tile_size = game->map.tile_size;
+
+    out->x = (float)(npc->spawn_x * tile_size + 7);
+    out->y = (float)(npc->spawn_y * tile_size + 7);
+    out->w = MOJAVE_NPC_SIZE;
+    out->h = MOJAVE_NPC_SIZE;
+    out->r = npc->outfit_r;
+    out->g = npc->outfit_g;
+    out->b = npc->outfit_b;
+    out->a = 255;
+    out->name = npc->name;
+    return true;
+}
+
+int mojave_map_get_width(const MojaveMap *map) {
+    if (map == NULL) {
+        return 0;
+    }
+    return map->width;
+}
+
+int mojave_map_get_height(const MojaveMap *map) {
+    if (map == NULL) {
+        return 0;
+    }
+    return map->height;
+}
+
+int mojave_map_get_tile_size(const MojaveMap *map) {
+    if (map == NULL) {
+        return 0;
+    }
+    return map->tile_size;
+}
+
+int mojave_map_get_tile(const MojaveMap *map, int x, int y) {
+    if (map == NULL || x < 0 || y < 0 || x >= map->width || y >= map->height) {
+        return 1;
+    }
+    return map->tiles[y * map->width + x];
+}
+
+const char *mojave_map_get_name(const MojaveMap *map) {
+    if (map == NULL) {
+        return "";
+    }
+    return map->name;
+}
+
 void mojave_game_shutdown(MojaveGame *game) {
     if (game == NULL) {
         return;

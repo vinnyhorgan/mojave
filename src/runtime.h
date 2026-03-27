@@ -164,4 +164,52 @@ void mojave_game_damage_entity(MojaveGame *game, ecs_entity_t entity, float dama
 float mojave_game_get_entity_hp(MojaveGame *game, ecs_entity_t entity);
 bool mojave_game_entity_is_alive(MojaveGame *game, ecs_entity_t entity);
 
+ecs_entity_t mojave_game_get_player(const MojaveGame *game);
+
+typedef struct {
+    float x;
+    float y;
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} MojaveRenderData;
+
+bool mojave_game_get_entity_render_data(const MojaveGame *game, ecs_entity_t entity, MojaveRenderData *out);
+
+typedef struct {
+    float x;
+    float y;
+    float w;
+    float h;
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+    bool collected;
+    const char *name;
+} MojaveItemRenderData;
+
+bool mojave_game_get_item_render_data(const MojaveGame *game, int index, MojaveItemRenderData *out);
+
+typedef struct {
+    float x;
+    float y;
+    float w;
+    float h;
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+    const char *name;
+} MojaveNpcRenderData;
+
+bool mojave_game_get_npc_render_data(const MojaveGame *game, int index, MojaveNpcRenderData *out);
+
+int mojave_map_get_width(const MojaveMap *map);
+int mojave_map_get_height(const MojaveMap *map);
+int mojave_map_get_tile_size(const MojaveMap *map);
+int mojave_map_get_tile(const MojaveMap *map, int x, int y);
+const char *mojave_map_get_name(const MojaveMap *map);
+
 #endif
