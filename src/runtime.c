@@ -27,6 +27,7 @@ ECS_COMPONENT_DECLARE(Hp) = 0;
 ECS_COMPONENT_DECLARE(ItemRef) = 0;
 ECS_COMPONENT_DECLARE(DialoguRef) = 0;
 ECS_COMPONENT_DECLARE(ActiveDialogue) = 0;
+ECS_COMPONENT_DECLARE(Npc) = 0;
 
 static bool mojave_game_add_inventory_item(MojaveGame *game, const MojaveItemDefinition *definition);
 static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item_id, int count);
@@ -83,14 +84,6 @@ static void mojave_move_player(const MojaveMap *map, Position *position, Velocit
         position->x = move_result.x;
         position->y = move_result.y;
     }
-}
-
-static float mojave_npc_world_x(const MojaveMap *map, const MojaveNpc *npc) {
-    return (float)(npc->spawn_x * map->tile_size + 7);
-}
-
-static float mojave_npc_world_y(const MojaveMap *map, const MojaveNpc *npc) {
-    return (float)(npc->spawn_y * map->tile_size + 7);
 }
 
 static float mojave_map_item_world_x(const MojaveMap *map, const MojaveMapItem *item) {
@@ -263,7 +256,7 @@ static int mojave_game_find_nearby_npc(const MojaveGame *game) {
     int best_index = -1;
     int i;
 
-    if (game == NULL) {
+    if (game == NULL || game->npc_entities == NULL) {
         return -1;
     }
 
@@ -272,13 +265,23 @@ static int mojave_game_find_nearby_npc(const MojaveGame *game) {
     player_center_y = player_position.y + MOJAVE_PLAYER_SIZE * 0.5f;
 
     for (i = 0; i < game->map.npc_count; i += 1) {
-        float npc_x = mojave_npc_world_x(&game->map, &game->map.npcs[i]);
-        float npc_y = mojave_npc_world_y(&game->map, &game->map.npcs[i]);
-        float npc_center_x = npc_x + MOJAVE_NPC_SIZE * 0.5f;
-        float npc_center_y = npc_y + MOJAVE_NPC_SIZE * 0.5f;
-        float dx = npc_center_x - player_center_x;
-        float dy = npc_center_y - player_center_y;
-        float distance_sq = dx * dx + dy * dy;
+        const Position *pos;
+        float npc_center_x;
+        float npc_center_y;
+        float dx;
+        float dy;
+        float distance_sq;
+
+        pos = ecs_get(game->world, game->npc_entities[i], Position);
+        if (pos == NULL) {
+            continue;
+        }
+
+        npc_center_x = pos->x + MOJAVE_NPC_SIZE * 0.5f;
+        npc_center_y = pos->y + MOJAVE_NPC_SIZE * 0.5f;
+        dx = npc_center_x - player_center_x;
+        dy = npc_center_y - player_center_y;
+        distance_sq = dx * dx + dy * dy;
 
         if (distance_sq <= MOJAVE_NPC_INTERACT_RANGE * MOJAVE_NPC_INTERACT_RANGE &&
             (best_index < 0 || distance_sq < best_distance_sq)) {
@@ -871,6 +874,7 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     ECS_COMPONENT_DEFINE(game->world, ItemRef);
     ECS_COMPONENT_DEFINE(game->world, DialoguRef);
     ECS_COMPONENT_DEFINE(game->world, ActiveDialogue);
+    ECS_COMPONENT_DEFINE(game->world, Npc);
 
     ECS_SYSTEM(game->world, MovementSystem, EcsOnUpdate, Position, Velocity);
 
@@ -886,6 +890,31 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     position = ecs_get_mut(game->world, game->player, Position);
     if (mojave_game_read_save(game, &position->x, &position->y)) {
         game->save_loaded = true;
+    }
+
+    if (game->map.npc_count > 0) {
+        MojaveDialogue dialogue = {0};
+        game->npc_entities = malloc((size_t)game->map.npc_count * sizeof(*game->npc_entities));
+        if (game->npc_entities == NULL) {
+            ecs_fini(game->world);
+            game->world = NULL;
+            free(game->quest_states);
+            game->quest_states = NULL;
+            free(game->map_item_collected);
+            game->map_item_collected = NULL;
+            mojave_item_database_unload(&game->item_database);
+            mojave_quest_log_unload(&game->quest_log);
+            mojave_map_unload(&game->map);
+            return false;
+        }
+        for (i = 0; i < game->map.npc_count; i += 1) {
+            memset(&dialogue, 0, sizeof(dialogue));
+            if (game->map.npcs[i].dialogue_path != NULL) {
+                mojave_dialogue_load(game->map.npcs[i].dialogue_path, &dialogue);
+            }
+            game->npc_entities[i] = mojave_game_spawn_npc_ecs(game, &game->map.npcs[i], dialogue.start_id != NULL ? &dialogue : NULL);
+            mojave_dialogue_unload(&dialogue);
+        }
     }
 
     return true;
@@ -915,6 +944,7 @@ ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_de
     if (dialogue && dialogue->start_id) {
         ecs_set(game->world, e, ActiveDialogue, {dialogue->start_id});
     }
+    ecs_set(game->world, e, Npc, {npc_def->name});
     return e;
 }
 
@@ -998,25 +1028,37 @@ bool mojave_game_get_item_render_data(const MojaveGame *game, int index, MojaveI
 }
 
 bool mojave_game_get_npc_render_data(const MojaveGame *game, int index, MojaveNpcRenderData *out) {
-    const MojaveNpc *npc;
-    int tile_size;
+    const Position *pos;
+    const Renderable *r;
+    const Npc *npc_comp;
+    ecs_entity_t entity;
 
     if (game == NULL || index < 0 || index >= game->map.npc_count) {
         return false;
     }
 
-    npc = &game->map.npcs[index];
-    tile_size = game->map.tile_size;
+    if (game->npc_entities == NULL) {
+        return false;
+    }
 
-    out->x = (float)(npc->spawn_x * tile_size + 7);
-    out->y = (float)(npc->spawn_y * tile_size + 7);
+    entity = game->npc_entities[index];
+    pos = ecs_get(game->world, entity, Position);
+    r = ecs_get(game->world, entity, Renderable);
+    npc_comp = ecs_get(game->world, entity, Npc);
+
+    if (pos == NULL || r == NULL || npc_comp == NULL) {
+        return false;
+    }
+
+    out->x = pos->x;
+    out->y = pos->y;
     out->w = MOJAVE_NPC_SIZE;
     out->h = MOJAVE_NPC_SIZE;
-    out->r = npc->outfit_r;
-    out->g = npc->outfit_g;
-    out->b = npc->outfit_b;
-    out->a = 255;
-    out->name = npc->name;
+    out->r = r->r;
+    out->g = r->g;
+    out->b = r->b;
+    out->a = r->a;
+    out->name = npc_comp->name;
     return true;
 }
 
@@ -1078,6 +1120,8 @@ void mojave_game_shutdown(MojaveGame *game) {
     free(game->quest_states);
     game->quest_states = NULL;
     game->quest_state_count = 0;
+    free(game->npc_entities);
+    game->npc_entities = NULL;
     free(game->inventory);
     game->inventory = NULL;
     game->inventory_count = 0;

@@ -68,6 +68,10 @@ typedef struct ActiveDialogue {
     const char *node_id;
 } ActiveDialogue;
 
+typedef struct Npc {
+    const char *name;
+} Npc;
+
 typedef enum {
     MOJAVE_TEAM_NONE = 0,
     MOJAVE_TEAM_PLAYER = 1,
@@ -102,6 +106,7 @@ typedef struct MojaveGame {
     MojaveQuestLog quest_log;
     MojaveQuestState *quest_states;
     int quest_state_count;
+    ecs_entity_t *npc_entities;
     MojaveFlagState *flags;
     int flag_count;
     bool *map_item_collected;
@@ -125,6 +130,7 @@ extern ECS_COMPONENT_DECLARE(Hp);
 extern ECS_COMPONENT_DECLARE(ItemRef);
 extern ECS_COMPONENT_DECLARE(DialoguRef);
 extern ECS_COMPONENT_DECLARE(ActiveDialogue);
+extern ECS_COMPONENT_DECLARE(Npc);
 
 extern const float MOJAVE_PLAYER_SIZE;
 extern const float MOJAVE_NPC_SIZE;
