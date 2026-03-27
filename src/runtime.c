@@ -20,6 +20,13 @@ static const char *MOJAVE_QUEST_LOG_PATH = "data/quests.json";
 
 ECS_COMPONENT_DECLARE(Position) = 0;
 ECS_COMPONENT_DECLARE(Velocity) = 0;
+ECS_COMPONENT_DECLARE(CollisionBox) = 0;
+ECS_COMPONENT_DECLARE(Renderable) = 0;
+ECS_COMPONENT_DECLARE(Team) = 0;
+ECS_COMPONENT_DECLARE(Hp) = 0;
+ECS_COMPONENT_DECLARE(ItemRef) = 0;
+ECS_COMPONENT_DECLARE(DialoguRef) = 0;
+ECS_COMPONENT_DECLARE(ActiveDialogue) = 0;
 
 static bool mojave_game_add_inventory_item(MojaveGame *game, const MojaveItemDefinition *definition);
 static bool mojave_game_remove_inventory_item(MojaveGame *game, const char *item_id, int count);
@@ -848,13 +855,22 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
 
     ECS_COMPONENT_DEFINE(game->world, Position);
     ECS_COMPONENT_DEFINE(game->world, Velocity);
+    ECS_COMPONENT_DEFINE(game->world, CollisionBox);
+    ECS_COMPONENT_DEFINE(game->world, Renderable);
+    ECS_COMPONENT_DEFINE(game->world, Team);
+    ECS_COMPONENT_DEFINE(game->world, Hp);
+    ECS_COMPONENT_DEFINE(game->world, ItemRef);
+    ECS_COMPONENT_DEFINE(game->world, DialoguRef);
+    ECS_COMPONENT_DEFINE(game->world, ActiveDialogue);
 
-    /* ECS is intentionally used very lightly here: one player entity, two plain components. */
     game->player = ecs_new(game->world);
     ecs_set(game->world, game->player, Position,
         { (float)(game->map.player_spawn_x * game->map.tile_size + 7),
           (float)(game->map.player_spawn_y * game->map.tile_size + 7) });
     ecs_set(game->world, game->player, Velocity, {0.0f, 0.0f});
+    ecs_set(game->world, game->player, CollisionBox, {MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE});
+    ecs_set(game->world, game->player, Team, {MOJAVE_TEAM_PLAYER});
+    ecs_set(game->world, game->player, Hp, {100.0f, 100.0f});
 
     position = ecs_get_mut(game->world, game->player, Position);
     if (mojave_game_read_save(game, &position->x, &position->y)) {
@@ -862,6 +878,62 @@ bool mojave_game_init(MojaveGame *game, const char *map_path, const char *save_p
     }
 
     return true;
+}
+
+ecs_entity_t mojave_game_spawn_player_ecs(MojaveGame *game, float x, float y) {
+    ecs_entity_t e = ecs_new(game->world);
+    ecs_set(game->world, e, Position, {x, y});
+    ecs_set(game->world, e, Velocity, {0.0f, 0.0f});
+    ecs_set(game->world, e, CollisionBox, {MOJAVE_PLAYER_SIZE, MOJAVE_PLAYER_SIZE});
+    ecs_set(game->world, e, Renderable, {42, 122, 184, 255});
+    ecs_set(game->world, e, Team, {MOJAVE_TEAM_PLAYER});
+    ecs_set(game->world, e, Hp, {100.0f, 100.0f});
+    return e;
+}
+
+ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_def, const MojaveDialogue *dialogue) {
+    ecs_entity_t e = ecs_new(game->world);
+    float wx = (float)(npc_def->spawn_x * game->map.tile_size + 7);
+    float wy = (float)(npc_def->spawn_y * game->map.tile_size + 7);
+    ecs_set(game->world, e, Position, {wx, wy});
+    ecs_set(game->world, e, Velocity, {0.0f, 0.0f});
+    ecs_set(game->world, e, CollisionBox, {MOJAVE_NPC_SIZE, MOJAVE_NPC_SIZE});
+    ecs_set(game->world, e, Renderable, {npc_def->outfit_r, npc_def->outfit_g, npc_def->outfit_b, 255});
+    ecs_set(game->world, e, Team, {MOJAVE_TEAM_FRIENDLY});
+    ecs_set(game->world, e, DialoguRef, {dialogue, dialogue ? dialogue->start_id : NULL});
+    if (dialogue && dialogue->start_id) {
+        ecs_set(game->world, e, ActiveDialogue, {dialogue->start_id});
+    }
+    return e;
+}
+
+ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y) {
+    ecs_entity_t e = ecs_new(game->world);
+    ecs_set(game->world, e, Position, {x, y});
+    ecs_set(game->world, e, CollisionBox, {MOJAVE_ITEM_SIZE, MOJAVE_ITEM_SIZE});
+    ecs_set(game->world, e, Renderable, {item_def->color_r, item_def->color_g, item_def->color_b, 255});
+    ecs_set(game->world, e, ItemRef, {item_def});
+    return e;
+}
+
+void mojave_game_damage_entity(MojaveGame *game, ecs_entity_t entity, float damage) {
+    Hp *hp = ecs_get_mut(game->world, entity, Hp);
+    if (hp != NULL) {
+        hp->current -= damage;
+        if (hp->current < 0.0f) {
+            hp->current = 0.0f;
+        }
+    }
+}
+
+float mojave_game_get_entity_hp(MojaveGame *game, ecs_entity_t entity) {
+    const Hp *hp = ecs_get(game->world, entity, Hp);
+    return hp ? hp->current : 0.0f;
+}
+
+bool mojave_game_entity_is_alive(MojaveGame *game, ecs_entity_t entity) {
+    const Hp *hp = ecs_get(game->world, entity, Hp);
+    return hp != NULL && hp->current > 0.0f;
 }
 
 void mojave_game_shutdown(MojaveGame *game) {

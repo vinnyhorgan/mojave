@@ -34,6 +34,47 @@ typedef struct Velocity {
     float y;
 } Velocity;
 
+typedef struct CollisionBox {
+    float w;
+    float h;
+} CollisionBox;
+
+typedef struct Renderable {
+    unsigned char r;
+    unsigned char g;
+    unsigned char b;
+    unsigned char a;
+} Renderable;
+
+typedef struct Team {
+    int team_id;
+} Team;
+
+typedef struct Hp {
+    float current;
+    float max;
+} Hp;
+
+typedef struct ItemRef {
+    const MojaveItemDefinition *definition;
+} ItemRef;
+
+typedef struct DialoguRef {
+    const MojaveDialogue *dialogue;
+    const char *start_id;
+} DialoguRef;
+
+typedef struct ActiveDialogue {
+    const char *node_id;
+} ActiveDialogue;
+
+typedef enum {
+    MOJAVE_TEAM_NONE = 0,
+    MOJAVE_TEAM_PLAYER = 1,
+    MOJAVE_TEAM_FRIENDLY = 2,
+    MOJAVE_TEAM_HOSTILE = 4,
+} MojaveTeam;
+
 typedef struct MojaveFlagState {
     char *id;
     bool value;
@@ -76,6 +117,13 @@ typedef struct MojaveGame {
 
 extern ECS_COMPONENT_DECLARE(Position);
 extern ECS_COMPONENT_DECLARE(Velocity);
+extern ECS_COMPONENT_DECLARE(CollisionBox);
+extern ECS_COMPONENT_DECLARE(Renderable);
+extern ECS_COMPONENT_DECLARE(Team);
+extern ECS_COMPONENT_DECLARE(Hp);
+extern ECS_COMPONENT_DECLARE(ItemRef);
+extern ECS_COMPONENT_DECLARE(DialoguRef);
+extern ECS_COMPONENT_DECLARE(ActiveDialogue);
 
 extern const float MOJAVE_PLAYER_SIZE;
 extern const float MOJAVE_NPC_SIZE;
@@ -107,5 +155,13 @@ int mojave_game_active_quest_count(const MojaveGame *game);
 const MojaveQuestState *mojave_game_active_quest(const MojaveGame *game, int index);
 int mojave_game_completed_quest_count(const MojaveGame *game);
 const MojaveQuestState *mojave_game_completed_quest(const MojaveGame *game, int index);
+
+ecs_entity_t mojave_game_spawn_player_ecs(MojaveGame *game, float x, float y);
+ecs_entity_t mojave_game_spawn_npc_ecs(MojaveGame *game, const MojaveNpc *npc_def, const MojaveDialogue *dialogue);
+ecs_entity_t mojave_game_spawn_item_ecs(MojaveGame *game, const MojaveItemDefinition *item_def, float x, float y);
+
+void mojave_game_damage_entity(MojaveGame *game, ecs_entity_t entity, float damage);
+float mojave_game_get_entity_hp(MojaveGame *game, ecs_entity_t entity);
+bool mojave_game_entity_is_alive(MojaveGame *game, ecs_entity_t entity);
 
 #endif
